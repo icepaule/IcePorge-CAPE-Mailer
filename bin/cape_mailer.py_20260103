@@ -1,0 +1,1716 @@
+#!/usr/bin/env python3
+"""
+CAPE Mailer - Malware Analysis & Phishing Detection
+=====================================================
+Automatische Analyse von E-Mail-Anhängen via CAPE Sandbox.
+
+Features:
+- Automatische Archiv-Entpackung (ZIP, 7z, RAR) mit Passwort-Erkennung
+- CAPE Sandbox Integration
+- Ollama LLM Bewertung
+- Phishing-Analyse für EML/MSG-Dateien
+- Banking-spezifische Checks (CEO-Fraud, Typosquatting)
+- URL-Prüfung via Tor
+- Magic Bytes Detection
+- HTML Reports + Splunk JSON Logs
+- MISP-ready IOC Export
+
+Author: SOC Team
+Version: 2.2.7
+"""
+
+import os
+import re
+import ssl
+import sys
+import json
+import time
+import yaml
+import email
+import shlex
+import socket
+import smtplib
+import hashlib
+import logging
+import tempfile
+import ipaddress
+import subprocess
+import urllib3
+from email import policy
+from email.parser import BytesParser
+from email.message import EmailMessage
+from email.utils import formatdate
+from dataclasses import dataclass, field, asdict
+from typing import Optional, List, Dict, Any, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from urllib.parse import urlparse
+from pathlib import Path
+
+import requests
+import pyzipper
+from imapclient import IMAPClient
+import pyzmail
+
+# SSL Warnings unterdrücken
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Optional imports für Phishing-Analyse
+try:
+    from bs4 import BeautifulSoup
+    import dns.resolver
+    PHISHING_DEPS_AVAILABLE = True
+except ImportError:
+    PHISHING_DEPS_AVAILABLE = False
+    BeautifulSoup = None
+
+# Optional: extract_msg für MSG-Dateien
+try:
+    import extract_msg
+    EXTRACT_MSG_AVAILABLE = True
+except ImportError:
+    EXTRACT_MSG_AVAILABLE = False
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+BASE = "/opt/cape-mailer"
+WORK = os.path.join(BASE, "work")
+PROCESSED = os.path.join(BASE, "processed")
+QUAR = os.path.join(BASE, "quarantine")
+LOGDIR = os.path.join(BASE, "logs")
+REPORTS_DIR = os.path.join(BASE, "reports")
+SPLUNK_LOG_DIR = os.path.join(LOGDIR, "splunk")
+CONFIG_DIR = os.path.join(BASE, "config")
+
+# Immer CC an diese Adresse
+ALWAYS_CC = "info@mpauli.de"
+
+# Tor SOCKS Proxy für URL-Checks
+TOR_PROXY = "socks5h://127.0.0.1:9050"
+
+# EML/MSG Extensions
+EML_EXTENSIONS = ('.eml', '.msg')
+
+# Magic Bytes
+MAGIC_BYTES = {
+    'exe': b'MZ',
+    'dll': b'MZ',
+    'zip': b'PK',
+    'rar': b'Rar!',
+    '7z': b"7z\xbc\xaf'\x1c",
+    'pdf': b'%PDF',
+    'ole': b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1',  # MSG, DOC, XLS
+    'ooxml': b'PK',  # DOCX, XLSX, PPTX (ZIP-based)
+}
+
+# Banking-spezifische Patterns
+GERMAN_BANKS = [
+    "sparkasse", "volksbank", "raiffeisenbank", "commerzbank", "deutsche bank",
+    "postbank", "ing-diba", "ing", "dkb", "comdirect", "hypovereinsbank", "unicredit",
+    "targobank", "santander", "n26", "bunq", "consorsbank", "norisbank", "sparda",
+    "apobank", "psd bank", "bw bank", "lbbw", "helaba", "landesbank", "kfw"
+]
+
+# CEO/Executive Fraud Keywords
+CEO_FRAUD_KEYWORDS = [
+    "dringend", "vertraulich", "geheim", "überweisung", "wire transfer",
+    "geschäftsführer", "ceo", "vorstand", "chef", "direktor",
+    "sofort", "immediately", "urgent", "asap", "zeitkritisch",
+    "nicht weiterleiten", "nur für sie", "persönlich"
+]
+
+# Default Archive Passwords
+DEFAULT_PASSWORDS = ["infected", "malware", "virus", "password", "123456", "test"]
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+
+os.makedirs(LOGDIR, exist_ok=True)
+os.makedirs(SPLUNK_LOG_DIR, exist_ok=True)
+os.makedirs(REPORTS_DIR, exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(message)s',
+    handlers=[
+        logging.FileHandler(os.path.join(LOGDIR, f"cape_mailer_{datetime.now().strftime('%Y-%m-%d')}.log")),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# =============================================================================
+# DATACLASSES
+# =============================================================================
+
+@dataclass
+class HeaderAnalysis:
+    from_address: str = ""
+    from_display: str = ""
+    reply_to: str = ""
+    return_path: str = ""
+    subject: str = ""
+    date: str = ""
+    message_id: str = ""
+    spf_result: str = ""
+    dkim_result: str = ""
+    dmarc_result: str = ""
+    originating_ip: str = ""
+    originating_country: str = ""
+    received_chain: List[Dict] = field(default_factory=list)
+    security_systems: List[str] = field(default_factory=list)
+    anomalies: List[str] = field(default_factory=list)
+    risk_score: int = 0
+
+@dataclass
+class URLAnalysis:
+    url: str = ""
+    domain: str = ""
+    is_reachable: bool = False
+    final_url: str = ""
+    has_login_form: bool = False
+    is_typosquatting: bool = False
+    typosquatting_target: str = ""
+    ssl_valid: bool = False
+    url_risk_score: int = 0
+    risk_reasons: List[str] = field(default_factory=list)
+
+@dataclass
+class ContentAnalysis:
+    extracted_urls: List[str] = field(default_factory=list)
+    extracted_ibans: List[str] = field(default_factory=list)
+    ceo_fraud_indicators: List[str] = field(default_factory=list)
+    urgency_score: int = 0
+    bank_mentions: List[str] = field(default_factory=list)
+    suspicious_phrases: List[str] = field(default_factory=list)
+    has_tracking_pixels: bool = False
+    content_risk_score: int = 0
+
+@dataclass
+class AttachmentAnalysis:
+    filename: str = ""
+    filetype: str = ""
+    sha256: str = ""
+    size: int = 0
+    is_executable: bool = False
+    has_macros: bool = False
+    is_double_extension: bool = False
+    risk_score: int = 0
+    risk_reasons: List[str] = field(default_factory=list)
+
+@dataclass 
+class PhishingAnalysisResult:
+    analysis_id: str = ""
+    timestamp: str = ""
+    source_file: str = ""
+    header_analysis: HeaderAnalysis = field(default_factory=HeaderAnalysis)
+    url_analyses: List[URLAnalysis] = field(default_factory=list)
+    content_analysis: ContentAnalysis = field(default_factory=ContentAnalysis)
+    attachment_analyses: List[AttachmentAnalysis] = field(default_factory=list)
+    ai_analysis: str = ""
+    overall_risk_score: int = 0
+    verdict: str = "unknown"
+    iocs: Dict = field(default_factory=dict)
+
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
+
+def load_cfg() -> dict:
+    """Lade Konfiguration aus YAML"""
+    cfg_path = os.path.join(CONFIG_DIR, "config.yaml")
+    if not os.path.exists(cfg_path):
+        # Fallback auf altes Format
+        cfg_path = os.path.join(BASE, "config.yaml")
+    
+    with open(cfg_path, 'r') as f:
+        return yaml.safe_load(f)
+
+def get_file_hash(filepath: str) -> str:
+    """Berechne SHA256 Hash"""
+    sha256 = hashlib.sha256()
+    with open(filepath, 'rb') as f:
+        for chunk in iter(lambda: f.read(8192), b''):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+def detect_file_type_by_magic(filepath: str) -> str:
+    """Erkenne Dateityp anhand Magic Bytes"""
+    try:
+        with open(filepath, 'rb') as f:
+            header = f.read(16)
+        
+        if header.startswith(b'MZ'):
+            return 'exe'
+        elif header.startswith(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'):
+            return 'ole'  # MSG, DOC, XLS
+        elif header.startswith(b'PK'):
+            # Check for OOXML (docx, xlsx, pptx) vs regular ZIP
+            return 'zip'
+        elif header.startswith(b'Rar!'):
+            return 'rar'
+        elif header.startswith(b"7z\xbc\xaf'\x1c"):
+            return '7z'
+        elif header.startswith(b'%PDF'):
+            return 'pdf'
+        elif b'From:' in header or b'Received:' in header:
+            return 'eml'
+        
+        return 'unknown'
+    except:
+        return 'unknown'
+
+def is_allowed(filepath: str, cfg: dict) -> bool:
+    """Prüfe ob Datei analysiert werden soll (Extension + Magic Bytes)"""
+    allowed = cfg.get("attachments", {}).get("allowed_extensions", [])
+    ext = os.path.splitext(filepath)[1].lower().lstrip('.')
+    
+    # 1. Extension Check
+    if ext in allowed:
+        return True
+    
+    # 2. Magic Bytes Check für Dateien ohne/mit falscher Extension
+    magic_type = detect_file_type_by_magic(filepath)
+    
+    if magic_type == 'exe' and ('exe' in allowed or 'dll' in allowed):
+        logger.debug(f"EXE via Magic Bytes erkannt: {filepath}")
+        return True
+    elif magic_type == 'ole' and ('msg' in allowed or 'doc' in allowed):
+        logger.debug(f"OLE (MSG/DOC) via Magic Bytes erkannt: {filepath}")
+        return True
+    elif magic_type == 'zip' and 'zip' in allowed:
+        return True
+    elif magic_type == 'pdf' and 'pdf' in allowed:
+        return True
+    
+    return False
+
+def extract_password_from_text(text: str) -> Optional[str]:
+    """Extrahiere Passwort aus Mail-Body"""
+    patterns = [
+        r'(?:passwort|password|pw|kennwort)[:\s]+["\']?([^\s"\'<>]+)["\']?',
+        r'(?:entpacken|extract|unzip)\s+(?:mit|with)[:\s]+["\']?([^\s"\'<>]+)["\']?',
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    
+    return None
+
+def try_extract_archive(archive_path: str, dest_dir: str, password: Optional[str] = None) -> List[str]:
+    """Versuche Archiv zu entpacken"""
+    extracted = []
+    ext = os.path.splitext(archive_path)[1].lower()
+    
+    passwords_to_try = [password] if password else []
+    passwords_to_try.extend(DEFAULT_PASSWORDS)
+    
+    for pwd in passwords_to_try:
+        try:
+            if ext == '.zip':
+                with pyzipper.AESZipFile(archive_path, 'r') as zf:
+                    pwd_bytes = pwd.encode() if pwd else None
+                    zf.extractall(dest_dir, pwd=pwd_bytes)
+                    extracted = [os.path.join(dest_dir, n) for n in zf.namelist()]
+                    break
+            elif ext == '.7z':
+                cmd = ['7z', 'x', f'-p{pwd}' if pwd else '', '-y', f'-o{dest_dir}', archive_path]
+                result = subprocess.run(cmd, capture_output=True, timeout=60)
+                if result.returncode == 0:
+                    extracted = [os.path.join(dest_dir, f) for f in os.listdir(dest_dir)]
+                    break
+            elif ext == '.rar':
+                cmd = ['unrar', 'x', f'-p{pwd}' if pwd else '', '-y', archive_path, dest_dir]
+                result = subprocess.run(cmd, capture_output=True, timeout=60)
+                if result.returncode == 0:
+                    extracted = [os.path.join(dest_dir, f) for f in os.listdir(dest_dir)]
+                    break
+        except Exception as e:
+            logger.debug(f"Entpacken mit Passwort '{pwd}' fehlgeschlagen: {e}")
+            continue
+    
+    return extracted
+
+# =============================================================================
+# SERVICE AVAILABILITY CHECKS
+# =============================================================================
+
+def check_ollama_available(cfg: dict) -> bool:
+    """Prüfe ob Ollama erreichbar ist"""
+    try:
+        host = cfg.get("ollama", {}).get("host", "http://localhost:11434")
+        r = requests.get(f"{host}/api/tags", timeout=5)
+        return r.status_code == 200
+    except:
+        return False
+
+def check_cape_available() -> bool:
+    """Prüfe ob CAPE API erreichbar ist"""
+    try:
+        r = requests.get("http://127.0.0.1:8000/apiv2/cuckoo/status/", timeout=5)
+        return r.status_code == 200
+    except:
+        return False
+
+# =============================================================================
+# HEADER ANALYZER (Enhanced)
+# =============================================================================
+
+class ImprovedHeaderAnalyzer:
+    """Verbesserte Header-Analyse mit IP-Extraktion und Security-System-Erkennung"""
+    
+    IP_PATTERNS = [
+        r'\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]',
+        r'\((\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\)',
+        r'from\s+\S+\s+\(.*?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})',
+        r'by\s+\S+.*?with.*?id.*?for.*?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})',
+        r'client-ip=(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})',
+        r'sender\s+ip\s+is\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})',
+        r'helo=.*?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})',
+    ]
+    
+    SECURITY_SYSTEMS = {
+        'sophos': ['sophos', 'sasi', 'pmx'],
+        'proofpoint': ['proofpoint', 'ppops'],
+        'mimecast': ['mimecast'],
+        'barracuda': ['barracuda', 'bsf'],
+        'fortimail': ['fortimail', 'fortinet'],
+        'cisco_esa': ['cisco', 'ironport', 'esa'],
+        'microsoft_atp': ['microsoft', 'atp', 'exchange online protection'],
+        'google': ['google', 'gmail'],
+        'spamassassin': ['spamassassin', 'spamd'],
+    }
+    
+    HIGH_RISK_COUNTRIES = ['RU', 'CN', 'KP', 'IR', 'NG', 'UA', 'BY']
+    
+    def __init__(self, msg, otx_client=None):
+        self.msg = msg
+        self.otx = otx_client
+        self.result = HeaderAnalysis()
+    
+    def analyze(self) -> HeaderAnalysis:
+        """Führe vollständige Header-Analyse durch"""
+        self._extract_basic_headers()
+        self._analyze_authentication()
+        self._analyze_received_chain()
+        self._detect_security_systems()
+        self._detect_anomalies()
+        self._calculate_risk_score()
+        return self.result
+    
+    def _extract_basic_headers(self):
+        """Extrahiere Basis-Header"""
+        self.result.from_address = self._get_header('From', '')
+        self.result.reply_to = self._get_header('Reply-To', '')
+        self.result.return_path = self._get_header('Return-Path', '')
+        self.result.subject = self._get_header('Subject', '')
+        self.result.date = self._get_header('Date', '')
+        self.result.message_id = self._get_header('Message-ID', '')
+        
+        # X-Originating-IP
+        for header in ['X-Originating-IP', 'X-Sender-IP', 'X-Source-IP']:
+            ip = self._get_header(header, '')
+            if ip:
+                self.result.originating_ip = ip.strip('[]')
+                break
+        
+        # Parse From Display Name
+        from_header = self.result.from_address
+        if '<' in from_header:
+            self.result.from_display = from_header.split('<')[0].strip().strip('"')
+            self.result.from_address = from_header.split('<')[1].rstrip('>')
+    
+    def _get_header(self, name: str, default: str = '') -> str:
+        """Hole Header-Wert sicher"""
+        try:
+            value = self.msg.get(name, default)
+            if value:
+                return str(value)
+            return default
+        except:
+            return default
+    
+    def _analyze_authentication(self):
+        """Analysiere SPF/DKIM/DMARC"""
+        auth_results = self._get_header('Authentication-Results', '')
+        
+        # SPF
+        spf_match = re.search(r'spf=(\w+)', auth_results, re.I)
+        self.result.spf_result = spf_match.group(1) if spf_match else 'none'
+        
+        # DKIM
+        dkim_match = re.search(r'dkim=(\w+)', auth_results, re.I)
+        self.result.dkim_result = dkim_match.group(1) if dkim_match else 'none'
+        
+        # DMARC
+        dmarc_match = re.search(r'dmarc=(\w+)', auth_results, re.I)
+        self.result.dmarc_result = dmarc_match.group(1) if dmarc_match else 'none'
+    
+    def _analyze_received_chain(self):
+        """Analysiere Received-Header-Kette"""
+        received_headers = self.msg.get_all('Received', [])
+        
+        for i, header in enumerate(received_headers):
+            header_str = str(header)
+            hop_info = {'raw': header_str[:200], 'ips': []}
+            
+            # IPs extrahieren
+            for pattern in self.IP_PATTERNS:
+                matches = re.findall(pattern, header_str, re.I)
+                for ip in matches:
+                    if self._is_valid_public_ip(ip):
+                        hop_info['ips'].append(ip)
+                        if not self.result.originating_ip and i == len(received_headers) - 1:
+                            self.result.originating_ip = ip
+            
+            self.result.received_chain.append(hop_info)
+    
+    def _is_valid_public_ip(self, ip: str) -> bool:
+        """Prüfe ob IP öffentlich ist"""
+        try:
+            addr = ipaddress.ip_address(ip)
+            return not (addr.is_private or addr.is_loopback or addr.is_reserved)
+        except:
+            return False
+    
+    def _detect_security_systems(self):
+        """Erkenne Security-Systeme in der Mail-Kette"""
+        all_headers = str(self.msg)
+        
+        for system, keywords in self.SECURITY_SYSTEMS.items():
+            for keyword in keywords:
+                if keyword.lower() in all_headers.lower():
+                    if system not in self.result.security_systems:
+                        self.result.security_systems.append(system)
+                    break
+    
+    def _detect_anomalies(self):
+        """Erkenne Header-Anomalien"""
+        # From/Reply-To Mismatch
+        if self.result.reply_to and self.result.from_address:
+            from_domain = self.result.from_address.split('@')[-1].lower() if '@' in self.result.from_address else ''
+            reply_domain = self.result.reply_to.split('@')[-1].lower() if '@' in self.result.reply_to else ''
+            if from_domain and reply_domain and from_domain != reply_domain:
+                self.result.anomalies.append(f"From/Reply-To Domain Mismatch: {from_domain} vs {reply_domain}")
+        
+        # Display Name Spoofing
+        if self.result.from_display and self.result.from_address:
+            if '@' in self.result.from_display:
+                display_domain = self.result.from_display.split('@')[-1].lower()
+                actual_domain = self.result.from_address.split('@')[-1].lower()
+                if display_domain != actual_domain:
+                    self.result.anomalies.append(f"Display Name Spoofing: {self.result.from_display}")
+        
+        # Failed Authentication
+        if self.result.spf_result in ['fail', 'softfail']:
+            self.result.anomalies.append(f"SPF {self.result.spf_result}")
+        if self.result.dkim_result == 'fail':
+            self.result.anomalies.append("DKIM fail")
+        if self.result.dmarc_result == 'fail':
+            self.result.anomalies.append("DMARC fail")
+    
+    def _calculate_risk_score(self):
+        """Berechne Risiko-Score"""
+        score = 0
+        
+        # Authentication failures
+        if self.result.spf_result == 'fail':
+            score += 20
+        elif self.result.spf_result == 'softfail':
+            score += 10
+        
+        if self.result.dkim_result == 'fail':
+            score += 15
+        
+        if self.result.dmarc_result == 'fail':
+            score += 15
+        
+        # Anomalies
+        score += len(self.result.anomalies) * 10
+        
+        self.result.risk_score = min(score, 100)
+
+# =============================================================================
+# URL ANALYZER
+# =============================================================================
+
+class URLAnalyzer:
+    """Analysiert URLs auf Phishing-Indikatoren"""
+    
+    def __init__(self, url: str, tor_proxy: str = TOR_PROXY):
+        self.url = url
+        self.tor_proxy = tor_proxy
+        self.result = URLAnalysis(url=url)
+    
+    def analyze(self) -> URLAnalysis:
+        """Führe URL-Analyse durch"""
+        parsed = urlparse(self.url)
+        self.result.domain = parsed.netloc.lower()
+        
+        self._check_typosquatting()
+        self._check_reachability()
+        
+        return self.result
+    
+    def _check_typosquatting(self):
+        """Prüfe auf Typosquatting deutscher Banken"""
+        domain = self.result.domain.lower()
+        
+        for bank in GERMAN_BANKS:
+            bank_clean = bank.replace(' ', '').replace('-', '')
+            domain_clean = domain.replace('-', '').replace('.', '')
+            
+            # Levenshtein-ähnliche Prüfung
+            if bank_clean in domain_clean and bank_clean != domain_clean:
+                self.result.is_typosquatting = True
+                self.result.typosquatting_target = bank
+                self.result.risk_reasons.append(f"Mögliches Typosquatting: {bank}")
+                self.result.url_risk_score += 30
+                break
+    
+    def _check_reachability(self):
+        """Prüfe URL-Erreichbarkeit via Tor"""
+        try:
+            proxies = {'http': self.tor_proxy, 'https': self.tor_proxy}
+            r = requests.get(self.url, proxies=proxies, timeout=15, verify=False, 
+                           allow_redirects=True, headers={'User-Agent': 'Mozilla/5.0'})
+            
+            self.result.is_reachable = True
+            self.result.final_url = r.url
+            
+            # Login-Form Detection
+            if BeautifulSoup:
+                soup = BeautifulSoup(r.text, 'html.parser')
+                password_fields = soup.find_all('input', {'type': 'password'})
+                if password_fields:
+                    self.result.has_login_form = True
+                    self.result.risk_reasons.append("Login-Formular gefunden")
+                    self.result.url_risk_score += 20
+            
+        except Exception as e:
+            logger.debug(f"URL nicht erreichbar: {self.url} - {e}")
+
+# =============================================================================
+# CONTENT ANALYZER  
+# =============================================================================
+
+class ContentAnalyzer:
+    """Analysiert Mail-Inhalt auf Phishing-Indikatoren"""
+    
+    IBAN_PATTERN = r'[A-Z]{2}\d{2}[\s]?(?:\d{4}[\s]?){4}\d{2}'
+    URL_PATTERN = r'https?://[^\s<>"{}|\\^`\[\]]+'
+    
+    def __init__(self, text: str, html: str = ""):
+        self.text = text
+        self.html = html
+        self.result = ContentAnalysis()
+    
+    def analyze(self) -> ContentAnalysis:
+        """Führe Content-Analyse durch"""
+        combined = f"{self.text} {self.html}"
+        
+        self._extract_urls()
+        self._extract_ibans()
+        self._check_ceo_fraud()
+        self._check_bank_mentions()
+        self._calculate_urgency()
+        self._check_tracking_pixels()
+        
+        return self.result
+    
+    def _extract_urls(self):
+        """Extrahiere URLs"""
+        combined = f"{self.text} {self.html}"
+        urls = re.findall(self.URL_PATTERN, combined)
+        self.result.extracted_urls = list(set(urls))[:50]  # Max 50 URLs
+    
+    def _extract_ibans(self):
+        """Extrahiere und maskiere IBANs (DSGVO)"""
+        ibans = re.findall(self.IBAN_PATTERN, self.text + self.html)
+        # Maskierung: DE12****1234
+        masked = []
+        for iban in set(ibans):
+            clean = iban.replace(' ', '')
+            masked.append(f"{clean[:4]}****{clean[-4:]}")
+        self.result.extracted_ibans = masked
+    
+    def _check_ceo_fraud(self):
+        """Prüfe auf CEO-Fraud-Indikatoren"""
+        combined = (self.text + self.html).lower()
+        for keyword in CEO_FRAUD_KEYWORDS:
+            if keyword.lower() in combined:
+                self.result.ceo_fraud_indicators.append(keyword)
+                self.result.content_risk_score += 5
+    
+    def _check_bank_mentions(self):
+        """Prüfe auf Bank-Erwähnungen"""
+        combined = (self.text + self.html).lower()
+        for bank in GERMAN_BANKS:
+            if bank.lower() in combined:
+                self.result.bank_mentions.append(bank)
+    
+    def _calculate_urgency(self):
+        """Berechne Urgency-Score"""
+        urgency_words = ['dringend', 'sofort', 'urgent', 'immediately', 'asap', 
+                        'wichtig', 'critical', 'action required', 'handlungsbedarf']
+        combined = (self.text + self.html).lower()
+        
+        for word in urgency_words:
+            if word in combined:
+                self.result.urgency_score += 10
+        
+        self.result.urgency_score = min(self.result.urgency_score, 100)
+    
+    def _check_tracking_pixels(self):
+        """Prüfe auf Tracking-Pixel"""
+        if BeautifulSoup and self.html:
+            soup = BeautifulSoup(self.html, 'html.parser')
+            imgs = soup.find_all('img')
+            for img in imgs:
+                src = img.get('src', '')
+                width = img.get('width', '')
+                height = img.get('height', '')
+                if (width == '1' or height == '1') or ('track' in src.lower()):
+                    self.result.has_tracking_pixels = True
+                    break
+
+# =============================================================================
+# PHISHING ANALYZER (MAIN)
+# =============================================================================
+
+class PhishingAnalyzer:
+    """Hauptklasse für Phishing-Analyse"""
+    
+    def __init__(self, cfg: dict):
+        self.cfg = cfg
+        phishing_cfg = cfg.get('phishing', {})
+        
+        # Ollama
+        ollama_cfg = cfg.get('ollama', {})
+        self.ollama_host = ollama_cfg.get('host', 'http://10.10.0.113:11434')
+        self.ollama_model = ollama_cfg.get('model', 'qwen2.5:14b-instruct')
+        self.ollama_timeout = ollama_cfg.get('timeout', 120)
+        
+        # Prompt laden
+        prompt_file = phishing_cfg.get('prompt_file', os.path.join(CONFIG_DIR, 'phishing_prompt.txt'))
+        self.prompt_template = self._load_prompt(prompt_file)
+    
+    def _load_prompt(self, filepath: str) -> str:
+        """Lade externen Prompt"""
+        try:
+            if os.path.exists(filepath):
+                with open(filepath, 'r') as f:
+                    logger.info(f"Externer Prompt geladen: {filepath}")
+                    return f.read()
+        except Exception as e:
+            logger.warning(f"Prompt-Datei nicht ladbar: {e}")
+        
+        # Fallback
+        return """Du bist ein Senior IT-Sicherheitsanalyst einer deutschen Bank (SOC Level 3).
+Analysiere die folgende E-Mail auf Phishing-Indikatoren.
+
+Bewerte:
+1. Header-Authentizität (SPF/DKIM/DMARC)
+2. Absender-Legitimität
+3. URL-Verdächtigkeit
+4. Social Engineering Taktiken
+5. Banking-spezifische Risiken
+
+Gib eine Risikobewertung: LOW / MEDIUM / HIGH / CRITICAL
+Begründe deine Einschätzung kurz."""
+    
+    def analyze_eml(self, eml_path: str) -> PhishingAnalysisResult:
+        """Analysiert eine EML/MSG-Datei"""
+        logger.info(f"Starte Phishing-Analyse: {eml_path}")
+        
+        result = PhishingAnalysisResult(
+            analysis_id=hashlib.md5(f"{eml_path}{datetime.now()}".encode()).hexdigest()[:12],
+            timestamp=datetime.now().isoformat(),
+            source_file=eml_path
+        )
+        
+        # Dateityp erkennen
+        file_type = detect_file_type_by_magic(eml_path)
+        
+        if file_type == 'ole':
+            # MSG-Datei
+            msg = self._parse_msg_file(eml_path)
+        else:
+            # EML-Datei
+            msg = self._parse_eml_file(eml_path)
+        
+        if not msg:
+            logger.error(f"Konnte Mail nicht parsen: {eml_path}")
+            return result
+        
+        # Header-Analyse
+        logger.info("Analysiere Header...")
+        header_analyzer = ImprovedHeaderAnalyzer(msg)
+        result.header_analysis = header_analyzer.analyze()
+        
+        # Content-Analyse
+        text_content, html_content = self._extract_body(msg)
+        content_analyzer = ContentAnalyzer(text_content, html_content)
+        result.content_analysis = content_analyzer.analyze()
+        
+        # URL-Analyse (max 20 URLs via Tor)
+        max_urls = self.cfg.get('phishing', {}).get('max_urls_to_check', 20)
+        urls_to_check = result.content_analysis.extracted_urls[:max_urls]
+        
+        if urls_to_check:
+            logger.info(f"Analysiere {len(urls_to_check)} URLs via Tor...")
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                futures = {executor.submit(self._analyze_url, url): url for url in urls_to_check}
+                for future in as_completed(futures):
+                    try:
+                        url_result = future.result()
+                        result.url_analyses.append(url_result)
+                    except Exception as e:
+                        logger.debug(f"URL-Analyse fehlgeschlagen: {e}")
+        
+        # KI-Analyse
+        if self.cfg.get('ollama', {}).get('enabled', True):
+            result.ai_analysis = self._get_ai_analysis(result)
+        
+        # Gesamtbewertung
+        self._calculate_overall_score(result)
+        
+        # IOCs extrahieren
+        result.iocs = self._extract_iocs(result)
+        
+        return result
+    
+    def _parse_eml_file(self, filepath: str) -> Optional[email.message.EmailMessage]:
+        """Parse EML-Datei"""
+        try:
+            with open(filepath, 'rb') as f:
+                return BytesParser(policy=policy.default).parse(f)
+        except Exception as e:
+            logger.error(f"EML Parse-Fehler: {e}")
+            return None
+    
+    def _parse_msg_file(self, filepath: str):
+        """Parse MSG-Datei"""
+        if not EXTRACT_MSG_AVAILABLE:
+            logger.warning("extract_msg nicht installiert, verwende Fallback")
+            return self._parse_eml_file(filepath)
+        
+        try:
+            msg = extract_msg.Message(filepath)
+            
+            # Konvertiere zu email.message-ähnlichem Objekt
+            class MSGWrapper:
+                def __init__(self, msg_obj):
+                    self._msg = msg_obj
+                    self._headers = {}
+                    self._build_headers()
+                
+                def _build_headers(self):
+                    # Extrahiere Header aus MSG
+                    if hasattr(self._msg, 'header'):
+                        header_text = self._msg.header.as_string() if self._msg.header else ""
+                        for line in header_text.split('\n'):
+                            if ':' in line:
+                                key, val = line.split(':', 1)
+                                self._headers[key.strip()] = val.strip()
+                    
+                    # Fallback auf MSG-Properties
+                    self._headers['From'] = getattr(self._msg, 'sender', '') or ''
+                    self._headers['To'] = getattr(self._msg, 'to', '') or ''
+                    self._headers['Subject'] = getattr(self._msg, 'subject', '') or ''
+                    self._headers['Date'] = getattr(self._msg, 'date', '') or ''
+                
+                def get(self, key, default=''):
+                    return self._headers.get(key, default)
+                
+                def get_all(self, key, default=None):
+                    val = self._headers.get(key)
+                    return [val] if val else (default or [])
+                
+                def __str__(self):
+                    return str(self._headers)
+                
+                @property
+                def body(self):
+                    return getattr(self._msg, 'body', '') or ''
+                
+                @property
+                def html_body(self):
+                    return getattr(self._msg, 'htmlBody', '') or ''
+            
+            return MSGWrapper(msg)
+            
+        except Exception as e:
+            logger.error(f"MSG Parse-Fehler: {e}")
+            return self._parse_eml_file(filepath)
+    
+    def _extract_body(self, msg) -> Tuple[str, str]:
+        """Extrahiere Text und HTML Body"""
+        text_content = ""
+        html_content = ""
+        
+        # Für MSGWrapper
+        if hasattr(msg, 'body'):
+            text_content = msg.body or ""
+            html_content = getattr(msg, 'html_body', '') or ""
+            return text_content, html_content
+        
+        # Für email.message
+        if msg.is_multipart():
+            for part in msg.walk():
+                content_type = part.get_content_type()
+                try:
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        charset = part.get_content_charset() or 'utf-8'
+                        decoded = payload.decode(charset, errors='replace')
+                        
+                        if content_type == 'text/plain':
+                            text_content += decoded
+                        elif content_type == 'text/html':
+                            html_content += decoded
+                except:
+                    pass
+        else:
+            try:
+                payload = msg.get_payload(decode=True)
+                if payload:
+                    text_content = payload.decode('utf-8', errors='replace')
+            except:
+                pass
+        
+        return text_content, html_content
+    
+    def _analyze_url(self, url: str) -> URLAnalysis:
+        """Analysiere einzelne URL"""
+        analyzer = URLAnalyzer(url)
+        return analyzer.analyze()
+    
+    def _get_ai_analysis(self, result: PhishingAnalysisResult) -> str:
+        """Hole KI-Bewertung von Ollama"""
+        try:
+            # Daten für Prompt aufbereiten
+            data = {
+                'from': result.header_analysis.from_address,
+                'subject': result.header_analysis.subject,
+                'spf': result.header_analysis.spf_result,
+                'dkim': result.header_analysis.dkim_result,
+                'anomalies': result.header_analysis.anomalies,
+                'urls_count': len(result.url_analyses),
+                'suspicious_urls': [u.url for u in result.url_analyses if u.url_risk_score > 20],
+                'ceo_fraud': result.content_analysis.ceo_fraud_indicators,
+                'bank_mentions': result.content_analysis.bank_mentions,
+            }
+            
+            prompt = f"{self.prompt_template}\n\nMail-Daten:\n{json.dumps(data, ensure_ascii=False, indent=2)}"
+            
+            r = requests.post(
+                f"{self.ollama_host}/api/generate",
+                json={"model": self.ollama_model, "prompt": prompt, "stream": False},
+                timeout=self.ollama_timeout
+            )
+            r.raise_for_status()
+            return r.json().get("response", "").strip()
+            
+        except Exception as e:
+            logger.error(f"Ollama-Analyse fehlgeschlagen: {e}")
+            return f"KI-Analyse fehlgeschlagen: {e}"
+    
+    def _calculate_overall_score(self, result: PhishingAnalysisResult):
+        """Berechne Gesamtscore und Verdict"""
+        score = 0
+        
+        # Header-Score
+        score += result.header_analysis.risk_score
+        
+        # Content-Score
+        score += result.content_analysis.content_risk_score
+        score += result.content_analysis.urgency_score // 2
+        score += len(result.content_analysis.ceo_fraud_indicators) * 5
+        
+        # URL-Score
+        for url in result.url_analyses:
+            score += url.url_risk_score // 2
+        
+        result.overall_risk_score = min(score, 100)
+        
+        # Verdict
+        if result.overall_risk_score >= 70:
+            result.verdict = "malicious"
+        elif result.overall_risk_score >= 40:
+            result.verdict = "suspicious"
+        elif result.overall_risk_score >= 20:
+            result.verdict = "likely_clean"
+        else:
+            result.verdict = "clean"
+    
+    def _extract_iocs(self, result: PhishingAnalysisResult) -> Dict:
+        """Extrahiere IOCs für MISP"""
+        return {
+            'email-src': [result.header_analysis.from_address] if result.header_analysis.from_address else [],
+            'ip-src': [result.header_analysis.originating_ip] if result.header_analysis.originating_ip else [],
+            'url': [u.url for u in result.url_analyses if u.url_risk_score > 30],
+            'domain': list(set([u.domain for u in result.url_analyses if u.is_typosquatting])),
+        }
+
+# =============================================================================
+# CAPE INTEGRATION
+# =============================================================================
+
+def submit_to_cape(cfg: dict, sample_path: str) -> Optional[int]:
+    """Submitte Sample an CAPE Sandbox"""
+    try:
+        submit_cfg = cfg.get("capesubmit", {})
+        timeout = submit_cfg.get("timeout", 300)
+        route = submit_cfg.get("route", "none")
+        machine = submit_cfg.get("machine", "")
+        
+        machine_opt = f"--machine {machine}" if machine else ""
+        
+        cmd = submit_cfg.get("submit_cmd", "").format(
+            timeout=timeout,
+            route=route,
+            machine_opt=machine_opt,
+            sample=shlex.quote(sample_path)
+        )
+        
+        logger.info(f"CAPE Submit: {os.path.basename(sample_path)}")
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+        
+        # Task-ID aus Output extrahieren
+        match = re.search(r'added as task with ID (\d+)', result.stdout)
+        if match:
+            task_id = int(match.group(1))
+            logger.info(f"Task erstellt: #{task_id}")
+            return task_id
+        else:
+            logger.error(f"Kein Task-ID gefunden: {result.stdout} {result.stderr}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"CAPE Submit fehlgeschlagen: {e}")
+        return None
+
+def wait_for_cape_report(cfg: dict, task_id: int) -> Optional[Dict]:
+    """Warte auf CAPE Report"""
+    results_cfg = cfg.get("caperesults", {})
+    analyses_dir = results_cfg.get("analyses_dir", "/opt/CAPEv2/storage/analyses")
+    max_wait = results_cfg.get("max_wait", 1800)
+    poll_interval = results_cfg.get("poll_interval", 30)
+    
+    report_path = os.path.join(analyses_dir, str(task_id), "reports", "report.json")
+    
+    start_time = time.time()
+    while time.time() - start_time < max_wait:
+        if os.path.exists(report_path):
+            try:
+                with open(report_path, 'r') as f:
+                    return json.load(f)
+            except:
+                pass
+        
+        logger.info(f"Warte auf Report für Task #{task_id}...")
+        time.sleep(poll_interval)
+    
+    logger.warning(f"Timeout beim Warten auf Report für Task #{task_id}")
+    return None
+
+def get_ollama_analysis(cfg: dict, report: Dict, sample_meta: Dict) -> str:
+    """Hole KI-Bewertung von Ollama mit erweitertem ITSO L3 Prompt"""
+    ollama_cfg = cfg.get("ollama", {})
+    if not ollama_cfg.get("enabled", True):
+        return "Ollama deaktiviert"
+
+    host = ollama_cfg.get("host", "http://10.10.0.113:11434")
+    model = ollama_cfg.get("model", "qwen2.5:14b-instruct")
+    timeout = ollama_cfg.get("timeout", 180)  # Erhöht für längere Analyse
+
+    # Lade externen Prompt falls vorhanden
+    prompt_file = "/opt/cape-mailer/config/cape_analysis_prompt.txt"
+    try:
+        with open(prompt_file, 'r') as f:
+            base_prompt = f.read()
+    except:
+        base_prompt = """Du bist ein ITSO Security Analyst Level 3 in einer deutschen Bank.
+Analysiere den CAPE Sandbox-Report und gib eine Bewertung mit:
+- Risiko-Level (CRITICAL/HIGH/MEDIUM/LOW)
+- Banking-Relevanz (Zahlungsverkehr, Auth, Ransomware, Datenabfluss)
+- Empfohlene Maßnahmen (Sofort, Kurzfristig, Mittelfristig)
+- BAIT/DORA Compliance-Hinweise
+- IOCs zum Blocken"""
+
+    # Report-Daten aufbereiten
+    info = report.get('info', {})
+    signatures = report.get('signatures', [])
+    network = report.get('network', {})
+    behavior = report.get('behavior', {})
+    
+    report_summary = {
+        'score': info.get('score', 0),
+        'duration': info.get('duration', 0),
+        'signatures': [{'name': s.get('name'), 'severity': s.get('severity'), 'description': s.get('description', '')[:200]} for s in signatures[:20]],
+        'network': {
+            'hosts': network.get('hosts', [])[:10],
+            'domains': network.get('domains', [])[:10],
+            'dns': network.get('dns', [])[:10],
+            'http': [{'uri': h.get('uri', ''), 'method': h.get('method', '')} for h in network.get('http', [])[:10]]
+        },
+        'processes': len(behavior.get('processes', [])),
+        'files_written': len(behavior.get('summary', {}).get('write_files', [])),
+        'registry_written': len(behavior.get('summary', {}).get('write_keys', []))
+    }
+
+    prompt = f"""{base_prompt}
+
+---
+
+**SAMPLE-INFORMATIONEN:**
+{json.dumps(sample_meta, ensure_ascii=False, indent=2)}
+
+**CAPE-REPORT:**
+{json.dumps(report_summary, ensure_ascii=False, indent=2)}
+""".strip()
+
+    logger.info(f"Starte ITSO L3 Ollama-Analyse mit Modell {model}")
+    
+    try:
+        r = requests.post(
+            f"{host}/api/generate",
+            json={"model": model, "prompt": prompt, "stream": False},
+            timeout=timeout
+        )
+        r.raise_for_status()
+        response = r.json().get("response", "").strip()
+        if response:
+            logger.info("Ollama ITSO L3 Analyse erfolgreich")
+            return response
+        return "Keine LLM-Antwort erhalten."
+    except Exception as e:
+        logger.error(f"Ollama-Analyse fehlgeschlagen: {e}")
+        return f"Ollama-Fehler: {e}"
+
+
+# =============================================================================
+# REPORT GENERATION
+# =============================================================================
+
+def generate_html_report(result: PhishingAnalysisResult) -> str:
+    """Generiere HTML-Report für Phishing-Analyse"""
+    
+    verdict_colors = {
+        'malicious': '#dc3545',
+        'suspicious': '#ffc107', 
+        'likely_clean': '#17a2b8',
+        'clean': '#28a745',
+        'unknown': '#6c757d'
+    }
+    
+    verdict_icons = {
+        'malicious': '🔴',
+        'suspicious': '🟡',
+        'likely_clean': '🟢',
+        'clean': '🟢',
+        'unknown': '⚪'
+    }
+    
+    color = verdict_colors.get(result.verdict, '#6c757d')
+    icon = verdict_icons.get(result.verdict, '⚪')
+    
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Phishing-Analyse Report - {result.analysis_id}</title>
+    <style>
+        body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
+        .container {{ max-width: 900px; margin: auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+        h1 {{ color: #333; border-bottom: 3px solid {color}; padding-bottom: 10px; }}
+        h2 {{ color: #555; margin-top: 30px; }}
+        .verdict {{ font-size: 24px; font-weight: bold; color: {color}; padding: 15px; background: #f8f9fa; border-radius: 5px; border-left: 5px solid {color}; }}
+        .score {{ font-size: 48px; color: {color}; }}
+        table {{ width: 100%; border-collapse: collapse; margin: 15px 0; }}
+        th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }}
+        th {{ background: #f8f9fa; }}
+        .risk-high {{ color: #dc3545; font-weight: bold; }}
+        .risk-medium {{ color: #ffc107; }}
+        .risk-low {{ color: #28a745; }}
+        .tag {{ display: inline-block; padding: 3px 8px; margin: 2px; background: #e9ecef; border-radius: 3px; font-size: 12px; }}
+        .tag-warning {{ background: #fff3cd; color: #856404; }}
+        .tag-danger {{ background: #f8d7da; color: #721c24; }}
+        pre {{ background: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto; }}
+        .section {{ margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 5px; }}
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>{icon} Phishing-Analyse Report</h1>
+    
+    <div class="verdict">
+        Verdict: {result.verdict.upper()}
+        <span class="score" style="float:right;">{result.overall_risk_score}/100</span>
+    </div>
+    
+    <p><strong>Analyse-ID:</strong> {result.analysis_id}<br>
+    <strong>Zeitstempel:</strong> {result.timestamp}<br>
+    <strong>Quelldatei:</strong> {os.path.basename(result.source_file)}</p>
+    
+    <h2>📧 Header-Analyse</h2>
+    <table>
+        <tr><th>Feld</th><th>Wert</th></tr>
+        <tr><td>Von</td><td>{result.header_analysis.from_address}</td></tr>
+        <tr><td>Display Name</td><td>{result.header_analysis.from_display}</td></tr>
+        <tr><td>Betreff</td><td>{result.header_analysis.subject}</td></tr>
+        <tr><td>Reply-To</td><td>{result.header_analysis.reply_to or '-'}</td></tr>
+        <tr><td>Return-Path</td><td>{result.header_analysis.return_path or '-'}</td></tr>
+        <tr><td>Originating IP</td><td>{result.header_analysis.originating_ip or 'Nicht ermittelt'}</td></tr>
+    </table>
+    
+    <h3>🔐 Authentifizierung</h3>
+    <table>
+        <tr><th>Check</th><th>Ergebnis</th></tr>
+        <tr><td>SPF</td><td class="{'risk-high' if result.header_analysis.spf_result in ['fail','softfail'] else ''}">{result.header_analysis.spf_result}</td></tr>
+        <tr><td>DKIM</td><td class="{'risk-high' if result.header_analysis.dkim_result == 'fail' else ''}">{result.header_analysis.dkim_result}</td></tr>
+        <tr><td>DMARC</td><td class="{'risk-high' if result.header_analysis.dmarc_result == 'fail' else ''}">{result.header_analysis.dmarc_result}</td></tr>
+    </table>
+    
+    <h3>⚠️ Anomalien</h3>
+    <div class="section">
+        {''.join([f'<span class="tag tag-warning">{a}</span>' for a in result.header_analysis.anomalies]) or '<em>Keine Anomalien erkannt</em>'}
+    </div>
+    
+    <h3>🛡️ Security-Systeme in der Kette</h3>
+    <div class="section">
+        {''.join([f'<span class="tag">{s}</span>' for s in result.header_analysis.security_systems]) or '<em>Keine erkannt</em>'}
+    </div>
+    
+    <h2>🔗 URL-Analyse ({len(result.url_analyses)} URLs)</h2>
+    <table>
+        <tr><th>URL</th><th>Erreichbar</th><th>Login-Form</th><th>Typosquatting</th><th>Score</th></tr>
+        {''.join([f"<tr><td style='word-break:break-all;'>{u.url[:80]}...</td><td>{'✅' if u.is_reachable else '❌'}</td><td>{'⚠️' if u.has_login_form else '-'}</td><td>{'🚨 '+u.typosquatting_target if u.is_typosquatting else '-'}</td><td>{u.url_risk_score}</td></tr>" for u in result.url_analyses[:20]]) or '<tr><td colspan="5"><em>Keine URLs gefunden</em></td></tr>'}
+    </table>
+    
+    <h2>📝 Inhaltsanalyse</h2>
+    <table>
+        <tr><th>Indikator</th><th>Wert</th></tr>
+        <tr><td>Extrahierte URLs</td><td>{len(result.content_analysis.extracted_urls)}</td></tr>
+        <tr><td>IBANs (maskiert)</td><td>{', '.join(result.content_analysis.extracted_ibans) or '-'}</td></tr>
+        <tr><td>CEO-Fraud Indikatoren</td><td class="{'risk-high' if result.content_analysis.ceo_fraud_indicators else ''}">{', '.join(result.content_analysis.ceo_fraud_indicators) or '-'}</td></tr>
+        <tr><td>Bank-Erwähnungen</td><td>{', '.join(result.content_analysis.bank_mentions) or '-'}</td></tr>
+        <tr><td>Urgency-Score</td><td>{result.content_analysis.urgency_score}/100</td></tr>
+        <tr><td>Tracking-Pixel</td><td>{'⚠️ Ja' if result.content_analysis.has_tracking_pixels else 'Nein'}</td></tr>
+    </table>
+    
+    <h2>🤖 KI-Bewertung</h2>
+    <div class="section">
+        <pre>{result.ai_analysis or 'Keine KI-Analyse verfügbar'}</pre>
+    </div>
+    
+    <h2>🎯 IOCs (MISP-ready)</h2>
+    <pre>{json.dumps(result.iocs, indent=2, ensure_ascii=False)}</pre>
+    
+    <hr>
+    <p style="color:#666; font-size:12px;">
+        Generiert von CAPE Phishing Analyzer v2.2.7<br>
+        {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+    </p>
+</div>
+</body>
+</html>"""
+    
+    return html
+
+def generate_splunk_log(result: PhishingAnalysisResult) -> Dict:
+    """Generiere Splunk-kompatibles JSON-Log"""
+    return {
+        "version": "2.2.7",
+        "event_type": "phishing_analysis",
+        "analysis_id": result.analysis_id,
+        "timestamp": result.timestamp,
+        "source_file": result.source_file,
+        
+        # Header
+        "from_address": result.header_analysis.from_address,
+        "from_display": result.header_analysis.from_display,
+        "from_domain": result.header_analysis.from_address.split('@')[-1] if '@' in result.header_analysis.from_address else "",
+        "reply_to": result.header_analysis.reply_to,
+        "subject": result.header_analysis.subject,
+        "originating_ip": result.header_analysis.originating_ip,
+        
+        # Auth
+        "spf_result": result.header_analysis.spf_result,
+        "dkim_result": result.header_analysis.dkim_result,
+        "dmarc_result": result.header_analysis.dmarc_result,
+        
+        # Scores
+        "header_risk_score": result.header_analysis.risk_score,
+        "content_risk_score": result.content_analysis.content_risk_score,
+        "overall_risk_score": result.overall_risk_score,
+        "verdict": result.verdict,
+        
+        # Counts
+        "anomalies_count": len(result.header_analysis.anomalies),
+        "anomalies": result.header_analysis.anomalies,
+        "security_systems_count": len(result.header_analysis.security_systems),
+        "security_systems": result.header_analysis.security_systems,
+        "urls_count": len(result.url_analyses),
+        "urls_with_login": len([u for u in result.url_analyses if u.has_login_form]),
+        "urls_typosquatting": len([u for u in result.url_analyses if u.is_typosquatting]),
+        "ceo_fraud_indicators": result.content_analysis.ceo_fraud_indicators,
+        "bank_mentions": result.content_analysis.bank_mentions,
+        "ibans_found": len(result.content_analysis.extracted_ibans),
+        "urgency_score": result.content_analysis.urgency_score,
+        
+        # IOCs
+        "iocs": result.iocs,
+    }
+
+def generate_cape_html_report(sample_name: str, task_id: int, report: Dict, 
+                              ai_analysis: str, malscore: float) -> str:
+    """Generiere HTML-Report für CAPE-Analyse"""
+    
+    if malscore >= 7:
+        color = '#dc3545'
+        verdict = 'MALICIOUS'
+        icon = '🔴'
+    elif malscore >= 4:
+        color = '#ffc107'
+        verdict = 'SUSPICIOUS'
+        icon = '🟡'
+    else:
+        color = '#28a745'
+        verdict = 'CLEAN'
+        icon = '🟢'
+    
+    # Signaturen extrahieren
+    signatures = report.get('signatures', [])
+    sig_html = ""
+    for sig in signatures[:20]:
+        severity = sig.get('severity', 1)
+        sev_class = 'risk-high' if severity >= 3 else 'risk-medium' if severity >= 2 else ''
+        sig_html += f"<tr><td class='{sev_class}'>{sig.get('name', 'Unknown')}</td><td>{sig.get('description', '')[:100]}</td><td>{severity}</td></tr>"
+    
+    # Network IOCs
+    network = report.get('network', {})
+    domains = network.get('domains', [])
+    hosts = network.get('hosts', [])
+    
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>CAPE Analyse - {sample_name}</title>
+    <style>
+        body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
+        .container {{ max-width: 900px; margin: auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+        h1 {{ color: #333; border-bottom: 3px solid {color}; padding-bottom: 10px; }}
+        .verdict {{ font-size: 24px; font-weight: bold; color: {color}; padding: 15px; background: #f8f9fa; border-radius: 5px; border-left: 5px solid {color}; }}
+        .score {{ font-size: 48px; color: {color}; }}
+        table {{ width: 100%; border-collapse: collapse; margin: 15px 0; }}
+        th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }}
+        th {{ background: #f8f9fa; }}
+        .risk-high {{ color: #dc3545; font-weight: bold; }}
+        .risk-medium {{ color: #ffc107; }}
+        pre {{ background: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto; white-space: pre-wrap; }}
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>{icon} CAPE Sandbox Analyse</h1>
+    
+    <div class="verdict">
+        Verdict: {verdict}
+        <span class="score" style="float:right;">{malscore:.1f}/10</span>
+    </div>
+    
+    <p><strong>Sample:</strong> {sample_name}<br>
+    <strong>Task-ID:</strong> #{task_id}<br>
+    <strong>Zeitstempel:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+    
+    <h2>🔍 Signaturen ({len(signatures)})</h2>
+    <table>
+        <tr><th>Name</th><th>Beschreibung</th><th>Severity</th></tr>
+        {sig_html or '<tr><td colspan="3"><em>Keine Signaturen</em></td></tr>'}
+    </table>
+    
+    <h2>🌐 Netzwerk-IOCs</h2>
+    <p><strong>Domains:</strong> {', '.join([d.get('domain','') for d in domains[:10]]) or 'Keine'}</p>
+    <p><strong>IPs:</strong> {', '.join([h.get('ip','') for h in hosts[:10]]) or 'Keine'}</p>
+    
+    <h2>🤖 KI-Bewertung</h2>
+    <pre>{ai_analysis}</pre>
+    
+    <hr>
+    <p style="color:#666; font-size:12px;">CAPE Mailer v2.2.7</p>
+</div>
+</body>
+</html>"""
+    
+    return html
+
+# =============================================================================
+# EMAIL SENDING
+# =============================================================================
+
+def send_mail(cfg: dict, to_addr: str, subject: str, html_body: str, 
+              cc_addr: str = None, attachments: List[Tuple[str, bytes]] = None):
+    """Sende E-Mail"""
+    smtp_cfg = cfg.get("smtp", {})
+    
+    msg = EmailMessage()
+    msg['From'] = smtp_cfg.get("from", "cape@example.com")
+    msg['To'] = to_addr
+    msg['Subject'] = subject
+    msg['Date'] = formatdate(localtime=True)
+    
+    if cc_addr:
+        msg['Cc'] = cc_addr
+    
+    msg.set_content("Dieser Report erfordert einen HTML-fähigen Mail-Client.")
+    msg.add_alternative(html_body, subtype='html')
+    
+    if attachments:
+        for filename, data in attachments:
+            msg.add_attachment(data, maintype='application', subtype='octet-stream', filename=filename)
+    
+    try:
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        with smtplib.SMTP(smtp_cfg.get("host"), int(smtp_cfg.get("port", 587))) as server:
+            if smtp_cfg.get("starttls", True):
+                server.starttls(context=ssl_context)
+            
+            if smtp_cfg.get("user") and smtp_cfg.get("pass"):
+                server.login(smtp_cfg["user"], smtp_cfg["pass"])
+            
+            recipients = [to_addr]
+            if cc_addr:
+                recipients.append(cc_addr)
+            
+            server.send_message(msg, to_addrs=recipients)
+            logger.info(f"Mail gesendet an {to_addr}")
+            
+    except Exception as e:
+        logger.error(f"Mail-Versand fehlgeschlagen: {e}")
+
+# =============================================================================
+# MAIN PROCESSING
+# =============================================================================
+
+def fetch_mailbox(cfg: dict) -> List[Dict]:
+    """Hole ungelesene Mails aus IMAP"""
+    imap_cfg = cfg.get("imap", {})
+    
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    
+    mails = []
+    
+    try:
+        use_ssl = imap_cfg.get("ssl", False)
+        port = int(imap_cfg.get("port", 993 if use_ssl else 143))
+        
+        with IMAPClient(imap_cfg["host"], port=port, ssl=use_ssl, ssl_context=ssl_context) as client:
+            if not use_ssl and imap_cfg.get("starttls", True):
+                client.starttls(ssl_context=ssl_context)
+            
+            client.login(imap_cfg["user"], imap_cfg["pass"])
+            client.select_folder(imap_cfg.get("folder", "INBOX"))
+            
+            uids = client.search(["UNSEEN"])
+            logger.info(f"Gefunden: {len(uids)} ungelesene E-Mails")
+            
+            for uid in uids:
+                try:
+                    raw = client.fetch([uid], ["RFC822"])[uid][b"RFC822"]
+                    msg = pyzmail.PyzMessage.factory(raw)
+                    
+                    from_addr = msg.get_addresses("from")[0][1] if msg.get_addresses("from") else ""
+                    subj = msg.get_subject() or "(kein Betreff)"
+                    
+                    # Body für Passwort-Extraktion
+                    body_text = ""
+                    if msg.text_part:
+                        try:
+                            body_text = msg.text_part.get_payload().decode(
+                                msg.text_part.charset or 'utf-8', errors='replace')
+                        except:
+                            pass
+                    
+                    password = extract_password_from_text(body_text)
+                    
+                    # Work-Verzeichnis
+                    work_dir = os.path.join(WORK, f"mail_{uid}_{int(time.time())}")
+                    os.makedirs(work_dir, exist_ok=True)
+                    
+                    attachments = []
+                    
+                    for part in msg.mailparts:
+                        if part.is_body:
+                            continue
+                        
+                        payload = part.get_payload()
+                        if not payload:
+                            continue
+                        
+                        # Payload zu bytes konvertieren
+                        if isinstance(payload, str):
+                            payload = payload.encode('utf-8', errors='replace')
+                        
+                        filename = part.filename or f"attachment_{len(attachments)}"
+                        
+                        # Magic Bytes Check
+                        if len(payload) > 8:
+                            magic = payload[:8]
+                            logger.debug(f"Part: filename={filename}, type={part.type}, payload_len={len(payload)}")
+                            logger.debug(f"Attachment Magic Bytes: {magic.hex()}")
+                            
+                            # OLE = MSG
+                            if magic.startswith(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'):
+                                if not filename.lower().endswith('.msg'):
+                                    filename = os.path.splitext(filename)[0] + '.msg'
+                                    logger.info(f"MSG-Format erkannt via Magic Bytes")
+                            # MZ = EXE
+                            elif magic.startswith(b'MZ'):
+                                if not os.path.splitext(filename)[1]:
+                                    filename = filename + '.exe'
+                                    logger.debug(f"EXE-Format erkannt via Magic Bytes")
+                        
+                        filepath = os.path.join(work_dir, filename)
+                        with open(filepath, 'wb') as f:
+                            f.write(payload)
+                        
+                        attachments.append(filepath)
+                        logger.info(f"Attachment: {filename} ({part.type}) -> {filepath}")
+                    
+                    mails.append({
+                        'uid': uid,
+                        'from': from_addr,
+                        'subject': subj,
+                        'body': body_text,
+                        'password': password,
+                        'work_dir': work_dir,
+                        'attachments': attachments,
+                        'client': client,
+                    })
+                    
+                    logger.info(f"Mail #{uid}: {subj} von {from_addr} - {len(attachments)} Anhänge")
+                    
+                except Exception as e:
+                    logger.error(f"Fehler bei Mail #{uid}: {e}")
+                    continue
+            
+            return mails
+            
+    except Exception as e:
+        logger.error(f"IMAP-Fehler: {e}")
+        return []
+
+def process_mail(cfg: dict, mail_data: Dict) -> bool:
+    """Verarbeite eine einzelne Mail"""
+    uid = mail_data['uid']
+    from_addr = mail_data['from']
+    subj = mail_data['subject']
+    password = mail_data.get('password')
+    work_dir = mail_data['work_dir']
+    attachments = mail_data['attachments']
+    client = mail_data.get('client')
+    
+    logger.info(f"Verarbeite Mail #{uid}: {subj}")
+    
+    samples = []
+    eml_files = []
+    
+    for attachment in attachments:
+        ext = os.path.splitext(attachment)[1].lower()
+        
+        # Archive entpacken
+        if ext in ['.zip', '.7z', '.rar']:
+            extracted = try_extract_archive(attachment, work_dir, password)
+            for f in extracted:
+                if is_allowed(f, cfg):
+                    samples.append(f)
+                elif os.path.splitext(f)[1].lower() in EML_EXTENSIONS:
+                    eml_files.append(f)
+        
+        # EML/MSG für Phishing-Analyse
+        elif ext in EML_EXTENSIONS or detect_file_type_by_magic(attachment) == 'ole':
+            eml_files.append(attachment)
+        
+        # Normale Samples
+        elif is_allowed(attachment, cfg):
+            samples.append(attachment)
+    
+    logger.info(f"Gefunden: {len(samples)} Sample(s), {len(eml_files)} E-Mail-Datei(en)")
+    
+    results_sent = False
+    
+    # Phishing-Analyse für EML/MSG
+    if eml_files and PHISHING_DEPS_AVAILABLE:
+        analyzer = PhishingAnalyzer(cfg)
+        
+        for eml_file in eml_files:
+            try:
+                result = analyzer.analyze_eml(eml_file)
+                
+                # HTML Report speichern
+                html_report = generate_html_report(result)
+                report_filename = f"phishing_{result.analysis_id}.html"
+                report_path = os.path.join(REPORTS_DIR, report_filename)
+                with open(report_path, 'w') as f:
+                    f.write(html_report)
+                logger.info(f"HTML-Report gespeichert: {report_path}")
+                
+                # Splunk Log
+                splunk_log = generate_splunk_log(result)
+                splunk_path = os.path.join(SPLUNK_LOG_DIR, f"phishing_{datetime.now().strftime('%Y-%m-%d')}.json")
+                with open(splunk_path, 'a') as f:
+                    f.write(json.dumps(splunk_log) + "\n")
+                
+                # Mail senden
+                verdict_icon = {'malicious': '🔴', 'suspicious': '🟡', 'clean': '🟢'}.get(result.verdict, '⚪')
+                mail_subject = f"[PHISHING ANALYSE] {verdict_icon} {result.verdict.upper()} - {subj}"
+                
+                send_mail(cfg, from_addr, mail_subject, html_report, cc_addr=ALWAYS_CC)
+                results_sent = True
+                
+            except Exception as e:
+                logger.error(f"Phishing-Analyse fehlgeschlagen: {e}")
+    
+    # CAPE-Analyse für Samples
+    if samples:
+        for sample in samples:
+            sample_name = os.path.basename(sample)
+            sample_hash = get_file_hash(sample)
+            
+            logger.info(f"Sample: {sample_name} (SHA256: {sample_hash[:16]}...)")
+            
+            task_id = submit_to_cape(cfg, sample)
+            if not task_id:
+                continue
+            
+            report = wait_for_cape_report(cfg, task_id)
+            if not report:
+                logger.warning(f"Kein Report für Task #{task_id}")
+                continue
+            
+            # Malscore
+            malscore = report.get('info', {}).get('score', 0)
+            
+            # KI-Analyse
+            sample_meta = {'name': sample_name, 'sha256': sample_hash, 'task_id': task_id}
+            ai_analysis = get_ollama_analysis(cfg, report, sample_meta)
+            
+            # HTML Report
+            html_report = generate_cape_html_report(sample_name, task_id, report, ai_analysis, malscore)
+            report_path = os.path.join(REPORTS_DIR, f"cape_{task_id}_{sample_hash[:8]}.html")
+            with open(report_path, 'w') as f:
+                f.write(html_report)
+            
+            # Ampel
+            ampel_cfg = cfg.get("ampel", {})
+            if malscore >= ampel_cfg.get("yellow_max_malscore", 4.9):
+                verdict = "MALICIOUS"
+                icon = "🔴"
+            elif malscore >= ampel_cfg.get("green_max_malscore", 1.9):
+                verdict = "SUSPICIOUS"
+                icon = "🟡"
+            else:
+                verdict = "CLEAN"
+                icon = "🟢"
+            
+            mail_subject = f"[CAPE ANALYSE] {icon} {verdict} (Score: {malscore:.1f}) - {sample_name}"
+            send_mail(cfg, from_addr, mail_subject, html_report, cc_addr=ALWAYS_CC)
+            results_sent = True
+    
+    return results_sent
+
+def main():
+    """Hauptfunktion"""
+    logger.info("=" * 60)
+    logger.info("CAPE Mailer v2.2.7 - Enhanced Header Analysis + Magic Bytes Detection gestartet")
+    
+    # Debug-Modus
+    if '--debug' in sys.argv:
+        logging.getLogger().setLevel(logging.DEBUG)
+    
+    cfg = load_cfg()
+    
+    # Verzeichnisse erstellen
+    for d in [WORK, PROCESSED, QUAR, LOGDIR, REPORTS_DIR, SPLUNK_LOG_DIR]:
+        os.makedirs(d, exist_ok=True)
+    
+    # Service-Checks
+    ollama_ok = check_ollama_available(cfg)
+    cape_ok = check_cape_available()
+    
+    if ollama_ok:
+        logger.debug(f"Ollama erreichbar: {cfg.get('ollama', {}).get('host')}")
+    else:
+        logger.warning("Ollama nicht erreichbar")
+    
+    if not cape_ok:
+        logger.warning("CAPE API nicht erreichbar")
+    
+    # Mails abholen
+    mails = fetch_mailbox(cfg)
+    
+    if not mails:
+        logger.info("Keine neuen Mails")
+        return
+    
+    logger.info(f"{len(mails)} E-Mails zur Verarbeitung")
+    
+    # SSL Context für IMAP
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    
+    # IMAP Verbindung für Markierung
+    imap_cfg = cfg.get("imap", {})
+    use_ssl = imap_cfg.get("ssl", False)
+    port = int(imap_cfg.get("port", 993 if use_ssl else 143))
+    
+    with IMAPClient(imap_cfg["host"], port=port, ssl=use_ssl, ssl_context=ssl_context) as client:
+        if not use_ssl and imap_cfg.get("starttls", True):
+            client.starttls(ssl_context=ssl_context)
+        
+        client.login(imap_cfg["user"], imap_cfg["pass"])
+        client.select_folder(imap_cfg.get("folder", "INBOX"))
+        
+        for mail_data in mails:
+            uid = mail_data['uid']
+            
+            # Prüfe ob Services verfügbar (für Samples)
+            has_samples = any(is_allowed(a, cfg) for a in mail_data['attachments'] 
+                            if os.path.splitext(a)[1].lower() not in EML_EXTENSIONS)
+            
+            if has_samples and not cape_ok:
+                logger.warning(f"Mail #{uid} übersprungen - CAPE nicht verfügbar")
+                continue
+            
+            try:
+                success = process_mail(cfg, mail_data)
+                
+                if success:
+                    # Als gelesen markieren
+                    client.add_flags([uid], ['\\Seen'])
+                    logger.debug(f"Mail #{uid} als gelesen markiert")
+                else:
+                    logger.warning(f"Mail #{uid} - keine Ergebnisse generiert")
+                    
+            except Exception as e:
+                logger.error(f"Fehler bei Mail #{uid}: {e}")
+                # Mail bleibt ungelesen für nächsten Durchlauf
+    
+    logger.info("Verarbeitung abgeschlossen")
+
+if __name__ == "__main__":
+    main()

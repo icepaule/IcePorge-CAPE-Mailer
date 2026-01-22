@@ -1,0 +1,98 @@
+# cape-mailer Configuration
+# Email-triggered CAPE analysis with automated response
+# Copy this file to config.yaml and fill in your values
+
+# ============================================
+# IMAP Configuration (incoming mail)
+# ============================================
+imap:
+  host: <YOUR_IMAP_SERVER>
+  port: 993
+  ssl: true
+  user: <YOUR_MAILBOX_USER>
+  pass: "<YOUR_MAILBOX_PASSWORD>"
+  folder: INBOX
+  # optional: move to subfolder after processing
+  move_to_folder: "Processed"
+
+# ============================================
+# SMTP Configuration (outgoing mail)
+# ============================================
+smtp:
+  host: <YOUR_SMTP_SERVER>
+  port: 25
+  starttls: false
+  user: <YOUR_SMTP_USER>
+  pass: "<YOUR_SMTP_PASSWORD>"
+  from: "<YOUR_FROM_ADDRESS>"
+  reply_subject_prefix: "[CAPE Analysis]"
+
+# ============================================
+# CAPE Submit Configuration
+# ============================================
+capesubmit:
+  cape_root: /opt/CAPEv2
+  route: none
+  timeout: 900
+  # optional: specific VM, or leave empty for CAPE to choose
+  machine: ""
+  submit_cmd: "sudo -u cape /opt/CAPEv2/.venv/bin/python3 /opt/CAPEv2/utils/submit.py --timeout {timeout} --route {route} {machine_opt} {sample}"
+
+# ============================================
+# CAPE Results Configuration
+# ============================================
+caperesults:
+  analyses_dir: /opt/CAPEv2/storage/analyses
+  max_wait: 1800
+  poll_interval: 10
+
+# ============================================
+# Email Parsing Configuration
+# ============================================
+parsing:
+  # Password pattern in email body (German example)
+  password_regex: "(?im)\\bPasswort\\s*:\\s*([^\\s]+)"
+  max_attach_mb: 200
+  allowed_extensions:
+    - exe
+    - dll
+    - ps1
+    - js
+    - vbs
+    - bat
+    - cmd
+    - msi
+    - iso
+    - img
+    - lnk
+    - pdf
+    - doc
+    - docx
+    - xls
+    - xlsx
+    - ppt
+    - pptx
+    - rtf
+    - html
+    - htm
+    - eml
+    - msg
+    - zip
+    - 7z
+    - rar
+
+# ============================================
+# Ollama LLM Integration (optional)
+# ============================================
+ollama:
+  enabled: false
+  host: "http://<YOUR_OLLAMA_HOST>:11434"
+  model: "qwen2.5:14b-instruct"
+  timeout: 120
+
+# ============================================
+# Traffic Light Scoring (Ampel)
+# ============================================
+ampel:
+  green_max_malscore: 1.9
+  yellow_max_malscore: 4.9

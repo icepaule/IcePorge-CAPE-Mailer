@@ -1,0 +1,631 @@
+#!/usr/bin/env python3
+import os
+import re
+import ssl
+import json
+import time
+import yaml
+import shlex
+import smtplib
+import hashlib
+import logging
+import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from email.message import EmailMessage
+from email.utils import formatdate
+
+import requests
+import pyzipper
+from imapclient import IMAPClient
+import pyzmail
+
+
+BASE = "/opt/cape-mailer"
+WORK = os.path.join(BASE, "work")
+PROCESSED = os.path.join(BASE, "processed")
+QUAR = os.path.join(BASE, "quarantine")
+LOGDIR = os.path.join(BASE, "logs")
+
+# Immer CC an diese Adresse
+ALWAYS_CC = "info@mpauli.de"
+
+
+def fix_permissions(path: str):
+    """Setzt Berechtigungen so, dass cape User lesen kann (755 für dirs, 644 für files)"""
+    import stat
+    if os.path.isdir(path):
+        os.chmod(path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)  # 755
+        for root, dirs, files in os.walk(path):
+            for d in dirs:
+                os.chmod(os.path.join(root, d), stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+            for f in files:
+                os.chmod(os.path.join(root, f), stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)  # 644
+    elif os.path.isfile(path):
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)  # 644
+
+
+# Logging Setup
+def setup_logging():
+    os.makedirs(LOGDIR, exist_ok=True)
+    logfile = os.path.join(LOGDIR, f"cape_mailer_{datetime.now().strftime('%Y-%m-%d')}.log")
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        handlers=[
+            logging.FileHandler(logfile, encoding='utf-8'),
+            logging.StreamHandler()  # Auch auf Console ausgeben
+        ]
+    )
+    return logging.getLogger(__name__)
+
+logger = setup_logging()
+
+
+def load_cfg(path="/opt/cape-mailer/config.yaml"):
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def sha256_file(p: str) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def send_mail(cfg, to_addr, subject, html_body, text_body=None, cc_addr=None):
+    msg = EmailMessage()
+    msg["From"] = cfg["smtp"]["from"]
+    msg["To"] = to_addr
+    msg["Date"] = formatdate(localtime=True)
+    msg["Subject"] = subject
+    
+    # CC hinzufügen wenn angegeben
+    if cc_addr:
+        msg["Cc"] = cc_addr
+
+    if not text_body:
+        text_body = re.sub(r"<[^>]+>", "", html_body)
+
+    msg.set_content(text_body)
+    msg.add_alternative(html_body, subtype="html")
+
+    host = cfg["smtp"]["host"]
+    port = int(cfg["smtp"]["port"])
+    starttls = bool(cfg["smtp"].get("starttls", True))
+
+    # Alle Empfänger (To + CC)
+    recipients = [to_addr]
+    if cc_addr:
+        recipients.append(cc_addr)
+
+    try:
+        with smtplib.SMTP(host, port, timeout=30) as s:
+            s.ehlo()
+            if starttls:
+                s.starttls(context=ssl.create_default_context())
+                s.ehlo()
+            if cfg["smtp"].get("user"):
+                s.login(cfg["smtp"]["user"], cfg["smtp"]["pass"])
+            s.send_message(msg, to_addrs=recipients)
+        logger.info(f"Mail gesendet an {to_addr}" + (f" (CC: {cc_addr})" if cc_addr else ""))
+    except Exception as e:
+        logger.error(f"Mail-Versand fehlgeschlagen an {to_addr}: {e}")
+        raise
+
+
+def extract_password(cfg, body_text: str) -> str | None:
+    rx = re.compile(cfg["parsing"]["password_regex"])
+    m = rx.search(body_text or "")
+    if not m:
+        return None
+    return m.group(1).strip()
+
+
+def save_attachment(msg: pyzmail.PyzMessage, part_idx: int, outdir: str) -> str | None:
+    part = msg.mailparts[part_idx]
+    filename = part.filename
+    if not filename:
+        return None
+
+    # sanitize filename
+    filename = filename.replace("\\", "_").replace("/", "_").strip()
+    path = os.path.join(outdir, filename)
+
+    payload = part.get_payload()
+    with open(path, "wb") as f:
+        f.write(payload)
+    return path
+
+
+def is_allowed(cfg, path: str) -> bool:
+    ext = os.path.splitext(path)[1].lower().lstrip(".")
+    return ext in set(cfg["parsing"]["allowed_extensions"])
+
+
+def unpack_zip_with_password(zip_path: str, password: str | None, outdir: str) -> list[str]:
+    extracted = []
+    pw = password.encode("utf-8") if password else None
+    with pyzipper.AESZipFile(zip_path) as zf:
+        for name in zf.namelist():
+            # skip directories
+            if name.endswith("/"):
+                continue
+            tgt = os.path.join(outdir, os.path.basename(name))
+            with zf.open(name, pwd=pw) as src, open(tgt, "wb") as dst:
+                dst.write(src.read())
+            extracted.append(tgt)
+    return extracted
+
+
+def unpack_with_7z(archive_path: str, password: str | None, outdir: str) -> list[str]:
+    # 7z x -y -oOUT [-pPASS] ARCHIVE
+    cmd = ["7z", "x", "-y", f"-o{outdir}"]
+    if password:
+        cmd.append(f"-p{password}")
+    cmd.append(archive_path)
+
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if p.returncode != 0:
+        raise RuntimeError(f"7z failed: {p.stdout}")
+
+    # collect extracted files
+    extracted = []
+    for root, _, files in os.walk(outdir):
+        for fn in files:
+            extracted.append(os.path.join(root, fn))
+    return extracted
+
+
+def collect_samples(cfg, attach_paths: list[str], password: str | None, workdir: str) -> list[str]:
+    """
+    Returns list of files to submit (best effort).
+    - If attachment is archive: try extract using pw from body
+    - If attachment is not archive: submit directly
+    """
+    submit = []
+
+    for p in attach_paths:
+        ext = os.path.splitext(p)[1].lower()
+        if ext == ".zip":
+            try:
+                extracted = unpack_zip_with_password(p, password, workdir)
+                submit.extend(extracted)
+                logger.info(f"ZIP entpackt: {p} -> {len(extracted)} Dateien")
+                for f in extracted:
+                    fix_permissions(f)
+            except Exception as e:
+                logger.warning(f"pyzipper fehlgeschlagen für {p}, versuche 7z: {e}")
+                # fallback to 7z if zip encryption variant not supported by pyzipper
+                extracted = unpack_with_7z(p, password, workdir)
+                submit.extend(extracted)
+                for f in extracted:
+                    fix_permissions(f)
+        elif ext in (".7z", ".rar"):
+            extracted = unpack_with_7z(p, password, workdir)
+            submit.extend(extracted)
+            logger.info(f"Archiv entpackt: {p} -> {len(extracted)} Dateien")
+            for f in extracted:
+                fix_permissions(f)
+        else:
+            submit.append(p)
+
+    # filter by allowlist extensions
+    submit2 = [s for s in submit if os.path.isfile(s) and is_allowed(cfg, s)]
+    # If archive had nested directories, keep basename duplicates safe:
+    return submit2
+
+
+def cape_submit(cfg, sample_path: str) -> int:
+    """
+    Submits sample via configured command, expects JSON output with task_id or id.
+    """
+    cmd_tmpl = cfg["capesubmit"]["submit_cmd"]
+    machine = (cfg["capesubmit"].get("machine") or "").strip()
+    machine_opt = f"--machine {shlex.quote(machine)}" if machine else ""
+    cmd = cmd_tmpl.format(
+        timeout=int(cfg["capesubmit"]["timeout"]),
+        route=cfg["capesubmit"]["route"],
+        machine_opt=machine_opt,
+        sample=shlex.quote(sample_path),
+    )
+
+    logger.info(f"CAPE Submit: {os.path.basename(sample_path)}")
+    p = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if p.returncode != 0:
+        logger.error(f"CAPE Submit fehlgeschlagen: {p.stdout}")
+        raise RuntimeError(f"CAPE submit failed: {p.stdout}")
+
+    # Try parse JSON from output
+    out = p.stdout.strip()
+    # find first '{' .. '}'
+    jstart = out.find("{")
+    jend = out.rfind("}")
+    if jstart >= 0 and jend > jstart:
+        data = json.loads(out[jstart:jend+1])
+        for k in ("task_id", "id", "taskid"):
+            if k in data:
+                task_id = int(data[k])
+                logger.info(f"CAPE Task erstellt: #{task_id}")
+                return task_id
+
+    # fallback: regex patterns
+    # Pattern 1: "with ID 24" (aktuelles CAPE Format)
+    m = re.search(r"\bwith\s+ID\s+(\d+)\b", out)
+    if m:
+        task_id = int(m.group(1))
+        logger.info(f"CAPE Task erstellt: #{task_id}")
+        return task_id
+    
+    # Pattern 2: "Task #17" (alternatives Format)
+    m = re.search(r"\bTask\s*#\s*(\d+)\b", out)
+    if m:
+        task_id = int(m.group(1))
+        logger.info(f"CAPE Task erstellt: #{task_id}")
+        return task_id
+
+    raise RuntimeError(f"Could not determine task id from submit output: {out[:500]}")
+
+
+def wait_for_report(cfg, task_id: int) -> dict:
+    """
+    Wait for report.json (best effort). CAPE produces multiple report formats; we try common paths.
+    """
+    analyses_dir = cfg["caperesults"]["analyses_dir"]
+    max_wait = int(cfg["caperesults"]["max_wait"])
+    poll = int(cfg["caperesults"]["poll_interval"])
+
+    base = os.path.join(analyses_dir, str(task_id))
+    candidates = [
+        os.path.join(base, "reports", "report.json"),
+        os.path.join(base, "reports", "report.json.gz"),
+        os.path.join(base, "reports", "cape_report.json"),
+    ]
+
+    logger.info(f"Warte auf Report für Task #{task_id} (max {max_wait}s)")
+    deadline = time.time() + max_wait
+    while time.time() < deadline:
+        for c in candidates:
+            if os.path.exists(c) and c.endswith(".json"):
+                with open(c, "r", encoding="utf-8", errors="replace") as f:
+                    logger.info(f"Report gefunden: {c}")
+                    return json.load(f)
+        time.sleep(poll)
+
+    logger.error(f"Timeout: Kein Report für Task #{task_id}")
+    raise TimeoutError(f"No report found for task {task_id} within {max_wait}s")
+
+
+def compute_ampel(cfg, report: dict) -> tuple[str, str]:
+    """
+    Returns (color_emoji, reasoning_short)
+    CAPE typically has "malscore" in report. If missing, fallback conservative.
+    """
+    malscore = None
+    if isinstance(report, dict):
+        malscore = report.get("malscore")
+        if malscore is None and "info" in report and isinstance(report["info"], dict):
+            malscore = report["info"].get("score")  # fallback
+
+    # Conservative defaults
+    if malscore is None:
+        return "🟠", "Kein Malscore verfügbar – konservativ als verdächtig eingestuft."
+
+    try:
+        ms = float(malscore)
+    except Exception:
+        return "🟠", f"Malscore nicht interpretierbar ({malscore}) – konservativ gelb."
+
+    gmax = float(cfg["ampel"]["green_max_malscore"])
+    ymax = float(cfg["ampel"]["yellow_max_malscore"])
+
+    if ms <= gmax:
+        return "🟢", f"Malscore {ms:.1f} ≤ {gmax:.1f}"
+    if ms <= ymax:
+        return "🟠", f"Malscore {ms:.1f} zwischen {gmax:.1f} und {ymax:.1f}"
+    return "🔴", f"Malscore {ms:.1f} > {ymax:.1f}"
+
+
+def ollama_eval(cfg, report: dict, sample_meta: dict) -> str:
+    if not cfg["ollama"].get("enabled", False):
+        return "Ollama ist deaktiviert."
+
+    host = cfg["ollama"]["host"].rstrip("/")
+    model = cfg["ollama"]["model"]
+    timeout = int(cfg["ollama"].get("timeout", 120))
+
+    logger.info(f"Ollama-Analyse mit Modell {model}")
+
+    # Keep prompt compact but bank-oriented
+    prompt = f"""
+Du bist ein Senior SOC Analyst (Bank, Deutschland) und bewertest Malware-Sandbox-Ergebnisse.
+Gib eine kurze Bewertung mit:
+- Risiko (Low/Medium/High/Critical)
+- Relevanz für eine regulierte Bank (z.B. Zahlungsverkehr, Auth, Ransomware, Datenabfluss)
+- Empfohlene Maßnahmen (technisch + organisatorisch)
+- Begründung anhand der CAPE-Befunde.
+
+Sample-Metadaten:
+{json.dumps(sample_meta, ensure_ascii=False, indent=2)}
+
+CAPE-Report (gekürzt/roh):
+{json.dumps(report, ensure_ascii=False)[:12000]}
+""".strip()
+
+    try:
+        payload = {"model": model, "prompt": prompt, "stream": False}
+        r = requests.post(f"{host}/api/generate", json=payload, timeout=timeout)
+        r.raise_for_status()
+        data = r.json()
+        return data.get("response", "").strip() or "Keine LLM-Antwort erhalten."
+    except Exception as e:
+        logger.error(f"Ollama-Analyse fehlgeschlagen: {e}")
+        return f"Ollama-Fehler: {e}"
+
+
+def process_single_sample(cfg, sample: str, subj: str, from_addr: str, password: bool) -> dict:
+    """
+    Verarbeitet ein einzelnes Sample: Submit, Wait, Analyze.
+    Gibt ein Result-Dict zurück für die Mail-Generierung.
+    """
+    meta = {
+        "original_subject": subj,
+        "sender": from_addr,
+        "filename": os.path.basename(sample),
+        "sha256": sha256_file(sample),
+        "password_in_mail": bool(password),
+    }
+
+    logger.info(f"Sample: {meta['filename']} (SHA256: {meta['sha256'][:16]}...)")
+
+    try:
+        task_id = cape_submit(cfg, sample)
+        report = wait_for_report(cfg, task_id)
+        ampel, reason = compute_ampel(cfg, report)
+        
+        logger.info(f"Ergebnis für {meta['filename']}: {ampel} - {reason}")
+        
+        llm = ollama_eval(cfg, report, meta)
+
+        # CAPE summary (best effort)
+        malscore = report.get("malscore", report.get("info", {}).get("score", "n/a"))
+        procs = report.get("behavior", {}).get("processes", [])
+        proc_count = len(procs) if isinstance(procs, list) else "n/a"
+
+        return {
+            "success": True,
+            "meta": meta,
+            "task_id": task_id,
+            "ampel": ampel,
+            "reason": reason,
+            "malscore": malscore,
+            "proc_count": proc_count,
+            "llm": llm,
+        }
+    except Exception as e:
+        logger.error(f"Analyse fehlgeschlagen für {meta['filename']}: {e}")
+        return {
+            "success": False,
+            "meta": meta,
+            "error": str(e),
+        }
+
+
+def generate_result_block(result: dict) -> str:
+    """Generiert HTML-Block für ein Analyse-Ergebnis."""
+    meta = result["meta"]
+    
+    if result["success"]:
+        return f"""
+        <hr>
+        <h3>{result["ampel"]} Ergebnis für: {meta["filename"]}</h3>
+        <p><b>SHA256:</b> <code>{meta["sha256"]}</code><br>
+           <b>Task-ID:</b> {result["task_id"]}<br>
+           <b>Malscore:</b> {result["malscore"]}<br>
+           <b>Begründung:</b> {result["reason"]}<br>
+           <b>Prozesse:</b> {result["proc_count"]}</p>
+        <details>
+          <summary><b>LLM-Risikobewertung (Ollama)</b></summary>
+          <pre>{result["llm"]}</pre>
+        </details>
+        """
+    else:
+        return f"""
+        <hr>
+        <h3>🟠 Fehler bei: {meta["filename"]}</h3>
+        <p><b>SHA256:</b> <code>{meta["sha256"]}</code></p>
+        <pre>{result["error"]}</pre>
+        """
+
+
+def main():
+    logger.info("=" * 60)
+    logger.info("Cape-Mailer gestartet")
+    
+    cfg = load_cfg()
+    os.makedirs(WORK, exist_ok=True)
+    os.makedirs(PROCESSED, exist_ok=True)
+    os.makedirs(QUAR, exist_ok=True)
+    os.makedirs(LOGDIR, exist_ok=True)
+
+    imap_cfg = cfg["imap"]
+    smtp_cfg = cfg["smtp"]
+
+    # SSL-Context für Self-Signed Certs
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+
+    # IMAP connect
+    logger.info(f"Verbinde zu IMAP {imap_cfg['host']}:{imap_cfg['port']}")
+    with IMAPClient(imap_cfg["host"], port=int(imap_cfg["port"]), ssl_context=ssl_context) as server:
+        server.login(imap_cfg["user"], imap_cfg["pass"])
+        server.select_folder(imap_cfg.get("folder", "INBOX"))
+        logger.info("IMAP Login erfolgreich")
+
+        # unseen
+        messages = server.search(["UNSEEN"])
+        logger.info(f"Gefundene ungelesene Mails: {len(messages)}")
+        
+        for uid in messages:
+            raw = server.fetch(uid, ["RFC822"])[uid][b"RFC822"]
+            msg = pyzmail.PyzMessage.factory(raw)
+
+            from_addr = msg.get_addresses("from")[0][1] if msg.get_addresses("from") else ""
+            subj = msg.get_subject() or "(no subject)"
+
+            logger.info(f"Verarbeite Mail UID {uid}: '{subj}' von {from_addr}")
+
+            # Body text for password extraction
+            body_text = ""
+            if msg.text_part:
+                body_text = msg.text_part.get_payload().decode(msg.text_part.charset or "utf-8", errors="replace")
+            elif msg.html_part:
+                body_text = msg.html_part.get_payload().decode(msg.html_part.charset or "utf-8", errors="replace")
+
+            password = extract_password(cfg, body_text)
+            if password:
+                logger.info(f"Passwort im Mail-Body gefunden")
+
+            # Prepare per-mail working dir
+            mail_dir = os.path.join(WORK, f"uid_{uid}")
+            os.makedirs(mail_dir, exist_ok=True)
+            fix_permissions(mail_dir)
+
+            attach_paths = []
+            for i, part in enumerate(msg.mailparts):
+                if part.is_body:
+                    continue
+                p = save_attachment(msg, i, mail_dir)
+                if not p:
+                    continue
+                
+                fix_permissions(p)
+
+                size_mb = os.path.getsize(p) / (1024 * 1024)
+                logger.info(f"Anhang: {os.path.basename(p)} ({size_mb:.2f} MB)")
+                
+                if size_mb > float(cfg["parsing"]["max_attach_mb"]):
+                    # too big -> quarantine
+                    logger.warning(f"Anhang zu groß, verschoben nach Quarantäne: {os.path.basename(p)}")
+                    os.rename(p, os.path.join(QUAR, os.path.basename(p)))
+                    continue
+
+                attach_paths.append(p)
+
+            # No attachments: mark seen, skip
+            if not attach_paths:
+                logger.info(f"Keine Anhänge gefunden, überspringe")
+                server.add_flags(uid, ["\\Seen"])
+                continue
+
+            # Collect submission candidates (unpack if needed)
+            try:
+                candidates = collect_samples(cfg, attach_paths, password, mail_dir)
+            except Exception as e:
+                logger.error(f"Fehler beim Entpacken: {e}")
+                html = f"""
+                <h2 style="color:orange">🟠 Analyse nicht möglich</h2>
+                <p>Betreff: {subj}</p>
+                <p>Fehler beim Entpacken/Verarbeiten der Anhänge: <pre>{str(e)}</pre></p>
+                """
+                send_mail(cfg, from_addr, f"{smtp_cfg['reply_subject_prefix']} {subj}", html, cc_addr=ALWAYS_CC)
+                server.add_flags(uid, ["\\Seen"])
+                continue
+
+            if not candidates:
+                logger.warning(f"Keine analysierbaren Dateien nach Filter")
+                html = f"""
+                <h2 style="color:orange">🟠 Keine analysierbaren Dateien gefunden</h2>
+                <p>Betreff: {subj}</p>
+                <p>Hinweis: Zulässige Endungen: {", ".join(cfg["parsing"]["allowed_extensions"])}</p>
+                """
+                send_mail(cfg, from_addr, f"{smtp_cfg['reply_subject_prefix']} {subj}", html, cc_addr=ALWAYS_CC)
+                server.add_flags(uid, ["\\Seen"])
+                continue
+
+            logger.info(f"Analysiere {len(candidates)} Sample(s) parallel (max 5)")
+
+            # Parallele Verarbeitung mit max 5 gleichzeitigen Analysen
+            results = []
+            with ThreadPoolExecutor(max_workers=min(5, len(candidates))) as executor:
+                futures = {
+                    executor.submit(
+                        process_single_sample, cfg, sample, subj, from_addr, password
+                    ): sample for sample in candidates
+                }
+                
+                for future in as_completed(futures):
+                    sample = futures[future]
+                    try:
+                        result = future.result()
+                        results.append(result)
+                    except Exception as e:
+                        logger.error(f"Unerwarteter Fehler bei {sample}: {e}")
+                        results.append({
+                            "success": False,
+                            "meta": {"filename": os.path.basename(sample), "sha256": "n/a"},
+                            "error": str(e),
+                        })
+
+            # Ergebnis-Blöcke generieren
+            results_blocks = [generate_result_block(r) for r in results]
+
+            # Compose overall mail with "Ampel-Header"
+            # Determine worst color from results
+            worst = "🟢"
+            for r in results:
+                if r["success"]:
+                    if r["ampel"] == "🔴":
+                        worst = "🔴"
+                        break
+                    elif r["ampel"] == "🟠" and worst != "🔴":
+                        worst = "🟠"
+                else:
+                    # Fehler = mindestens gelb
+                    if worst == "🟢":
+                        worst = "🟠"
+
+            logger.info(f"Gesamtergebnis für Mail '{subj}': {worst}")
+
+            color = {"🟢": "green", "🟠": "orange", "🔴": "red"}[worst]
+            header = f"<h2 style='color:{color}'>{worst} CAPE Analyse – Handlungsempfehlung</h2>"
+
+            rec = {
+                "🟢": "<p><b>Empfehlung:</b> Datei kann i.d.R. freigegeben werden. Bei Kontextverdacht dennoch manuelle Prüfung.</p>",
+                "🟠": "<p><b>Empfehlung:</b> Nicht öffnen. SOC/ITSO entscheidet nach manueller Validierung (IOC-Abgleich, Reputation, Kontext).</p>",
+                "🔴": "<p><b>Empfehlung:</b> Nicht öffnen. Quarantäne/Block, Incident prüfen (DORA/BAIT-relevant), IOCs verteilen.</p>",
+            }[worst]
+
+            html = f"""
+            {header}
+            <p><b>Original-Betreff:</b> {subj}<br>
+               <b>Absender:</b> {from_addr}<br>
+               <b>Passwort erkannt:</b> {"ja" if password else "nein"}</p>
+            {rec}
+            {''.join(results_blocks)}
+            """
+
+            send_mail(cfg, from_addr, f"{smtp_cfg['reply_subject_prefix']} {subj}", html, cc_addr=ALWAYS_CC)
+
+            # mark as seen and optionally move
+            server.add_flags(uid, ["\\Seen"])
+            move_to = imap_cfg.get("move_to_folder")
+            if move_to:
+                try:
+                    server.move([uid], move_to)
+                    logger.info(f"Mail verschoben nach {move_to}")
+                except Exception as e:
+                    logger.warning(f"Mail verschieben fehlgeschlagen: {e}")
+
+    logger.info("Cape-Mailer beendet")
+    logger.info("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
+

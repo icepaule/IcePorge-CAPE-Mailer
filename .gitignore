@@ -1,0 +1,25 @@
+# Secrets and environment
+config.yaml
+*.pem
+*.key
+
+# Runtime data
+work/
+logs/
+*.log
+*.lock
+*.pid
+reports/
+quarantine/
+processed/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# User files
+.bash*
+.profile
+.cache/
