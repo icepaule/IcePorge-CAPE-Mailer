@@ -271,26 +271,26 @@ osint:
   # AlienVault OTX - Threat Intelligence
   otx:
     enabled: true
-    api_key: "***REMOVED***"
+    api_key: "<MASKED_OTX_KEY>"
     timeout: 10
 
   # AbuseIPDB - IP Reputation
   abuseipdb:
     enabled: true
-    api_key: "***REMOVED***"
+    api_key: "<MASKED_ABUSEIPDB_KEY>"
     timeout: 10
     max_age_days: 90
 
   # VirusTotal - Multi-Engine Scanner
   virustotal:
     enabled: true
-    api_key: "***REMOVED***"
+    api_key: "<MASKED_VIRUSTOTAL_KEY>"
     timeout: 15
 
   # Google Safe Browsing
   google_safe_browsing:
     enabled: true
-    api_key: "***REMOVED***"
+    api_key: "<MASKED_GOOGLE_SAFEBROWSING_KEY>"
     timeout: 10
 
   # Spamhaus (DNS-basiert, kostenlos)
@@ -309,7 +309,7 @@ Automatische Event-Erstellung bei kritischen Findings:
 misp:
   enabled: true
   url: "https://10.10.0.204"
-  api_key: "***REMOVED***"
+  api_key: "<MASKED_MISP_KEY>"
   verify_ssl: false
 
   # Event Settings

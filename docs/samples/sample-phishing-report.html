@@ -28,11 +28,11 @@
 <body>
 <div class="container">
     <div class="sample-notice">
-        <strong>📋 Sample Report</strong> - This is an anonymized example report for documentation purposes.
+        <strong>📋#128203; Sample Report</strong> - This is an anonymized example report for documentation purposes.
         Domains and IP addresses have been masked for GDPR compliance.
     </div>
 
-    <h1>🔴 Phishing-Analyse Report</h1>
+    <h1>🔴#128308; Phishing-Analyse Report</h1>
 
     <div class="verdict">
         Verdict: MALICIOUS
@@ -43,10 +43,10 @@
     <strong>Zeitstempel:</strong> 2026-01-22T16:16:23.520135<br>
     <strong>Quelldatei:</strong> message.eml</p>
 
-    <h2>📧 Header-Analyse</h2>
+    <h2>📧#128231; Header-Analyse</h2>
     <table>
         <tr><th>Feld</th><th>Wert</th></tr>
-        <tr><td>Von</td><td>noreply@kundenservice.example.de</td></tr>
+        <tr><td>Von</td><td>noreply@kundenservice.example.example</td></tr>
         <tr><td>Display Name</td><td>Example Kundenservice</td></tr>
         <tr><td>Betreff</td><td>*SPAM*  Re: Welcome to Service Desk - Ticketnummer: 03221782</td></tr>
         <tr><td>Reply-To</td><td>-</td></tr>
@@ -62,14 +62,14 @@
         <tr><td>DMARC</td><td class="">none</td><td>none</td></tr>
     </table>
 
-    <h3>🛡️ Mail-Routing-Analyse <span class="info-badge">TLS/Cipher-Check</span></h3>
+    <h3>🛡️#128737; Mail-Routing-Analyse <span class="info-badge">TLS/Cipher-Check</span></h3>
     <table>
         <tr><th>#</th><th>From Server</th><th>To Server</th><th>IPs</th><th>TLS</th><th>Cipher</th></tr>
 
         <tr>
             <td>1</td>
             <td>N/A</td>
-            <td>mail-ed1-f71.example.com</td>
+            <td>mail-ed1-f71.example.example</td>
             <td>N/A</td>
             <td>N/A</td>
             <td>N/A</td>
@@ -77,7 +77,7 @@
 
         <tr>
             <td>2</td>
-            <td>mail-ed1-f71.example.com</td>
+            <td>mail-ed1-f71.example.example</td>
             <td>fw2.mpauli.de</td>
             <td>XXX.85.208.71, XXX.85.208.71</td>
             <td>N/A</td>
@@ -105,7 +105,7 @@
         <tr>
             <td>5</td>
             <td>N/A</td>
-            <td>mx1.core1.sfdc-xxxxx.mta.example.com</td>
+            <td>mx1.core1.sfdc-xxxxx.mta.example.example</td>
             <td>XXX.7.0.201, XXX.7.0.201</td>
             <td>N/A</td>
             <td>N/A</td>
@@ -131,29 +131,29 @@
 
         <tr>
             <td>8</td>
-            <td>smtp-3b5c9707.core1.sfdc-xxxxx.mta.example.com</td>
-            <td>mx.example.com</td>
+            <td>smtp-3b5c9707.core1.sfdc-xxxxx.mta.example.example</td>
+            <td>mx.example.example</td>
             <td>XXX.198.173.134, XXX.198.173.134</td>
             <td>TLS1_3</td>
             <td>TLS_AES_256_GCM_SHA384</td>
         </tr>
 
     </table>
-    <p><strong>TLS Encryption:</strong> ✅ Ja |
-       <strong>ARC Headers:</strong> ❌ Nein</p>
-    <p class="risk-high"><strong>⚠️ Security Issues:</strong> No ARC headers in multi-hop chain</p>
+    <p><strong>TLS Encryption:</strong> &check; Ja |
+       <strong>ARC Headers:</strong> &cross; Nein</p>
+    <p class="risk-high"><strong>&#9888; Security Issues:</strong> No ARC headers in multi-hop chain</p>
 
-    <h3>⚠️ Anomalien</h3>
+    <h3>&#9888; Anomalien</h3>
     <div class="section">
         <em>Keine Anomalien erkannt</em>
     </div>
 
-    <h3>🛡️ Security-Systeme in der Kette</h3>
+    <h3>🛡️#128737; Security-Systeme in der Kette</h3>
     <div class="section">
         <span class="tag">sophos</span><span class="tag">barracuda</span><span class="tag">cisco_esa</span><span class="tag">microsoft_atp</span><span class="tag">google</span><span class="tag">spamassassin</span><span class="tag">exim</span>
     </div>
 
-    <h2>🔧 Security-Recommendations für Mail-Gateway-Tuning</h2>
+    <h2>🔧#128295; Security-Recommendations für Mail-Gateway-Tuning</h2>
 
         <div class="recommendation" style="border-left: 4px solid #ffc107; margin: 10px 0; padding: 10px; background: #f8f9fa;">
             <strong style="color: #ffc107;">Mail Gateway (SPF)</strong>
@@ -190,19 +190,19 @@ config_rspamd: dmarc { enabled = true; }
             <p><strong>Issue:</strong> No ARC (Authenticated Received Chain) headers</p>
             <p><strong>Recommendation:</strong> Enable ARC sealing to preserve authentication through forwarding</p>
             <pre style="background: white; padding: 8px; font-size: 11px; overflow-x: auto;">
-config_exchange: Set-TransportConfig -ARCTrustedSealers @{Add="domain.com"}
+config_exchange: Set-TransportConfig -ARCTrustedSealers @{Add="domain.example"}
 config_rspamd: arc { enabled = true; mode = "sign"; }
             </pre>
         </div>
 
 
-    <h2>🔗 URL-Analyse (4 URLs)</h2>
+    <h2>🔗#128279; URL-Analyse (4 URLs)</h2>
     <table>
         <tr><th>URL</th><th>Erreichbar</th><th>Login-Form</th><th>Typosquatting</th><th>Score</th></tr>
-        <tr><td style='word-break:break-all;'>https://serviceportal.example.de/datenschutz-abo...</td><td>❌</td><td>-</td><td>-</td><td>0</td></tr><tr><td style='word-break:break-all;'>https://serviceportal.example.de...</td><td>❌</td><td>-</td><td>-</td><td>0</td></tr><tr><td style='word-break:break-all;'>https://example.file.force.com/file-asset-public/OSP?oid=00D2p0000013rIm...</td><td>❌</td><td>-</td><td>-</td><td>0</td></tr><tr><td style='word-break:break-all;'>https://serviceportal.example.de/s/faq...</td><td>❌</td><td>-</td><td>-</td><td>0</td></tr>
+        <tr><td style='word-break:break-all;'>https://serviceportal.example.example/datenschutz-abo...</td><td>&cross;</td><td>-</td><td>-</td><td>0</td></tr><tr><td style='word-break:break-all;'>https://serviceportal.example.example...</td><td>&cross;</td><td>-</td><td>-</td><td>0</td></tr><tr><td style='word-break:break-all;'>https://example.file.force.example/file-asset-public/OSP?oid=00D2p0000013rIm...</td><td>&cross;</td><td>-</td><td>-</td><td>0</td></tr><tr><td style='word-break:break-all;'>https://serviceportal.example.example/s/faq...</td><td>&cross;</td><td>-</td><td>-</td><td>0</td></tr>
     </table>
 
-    <h2>📝 Inhaltsanalyse</h2>
+    <h2>📝#128221; Inhaltsanalyse</h2>
     <table>
         <tr><th>Indikator</th><th>Wert</th></tr>
         <tr><td>Extrahierte URLs</td><td>4</td></tr>
@@ -231,16 +231,16 @@ config_rspamd: arc { enabled = true; mode = "sign"; }
     <h3>🏷️ Domain Reputation (3 Domains)</h3>
     <table>
         <tr><th>Domain</th><th>Threat Score</th><th>Threat Indicators</th></tr>
-        <tr><td>example.file.force.com</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td>serviceportal.example.de</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td>serviceportal.example.de</td><td class="">0/100</td><td><em>Clean</em></td></tr>
+        <tr><td>example.file.force.example</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td>serviceportal.example.example</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td>serviceportal.example.example</td><td class="">0/100</td><td><em>Clean</em></td></tr>
     </table>
 
-    <h3>🔗 URL Reputation (4 URLs)</h3>
+    <h3>🔗#128279; URL Reputation (4 URLs)</h3>
     <table>
         <tr><th>URL</th><th>Threat Score</th><th>Threat Indicators</th></tr>
-        <tr><td style="word-break:break-all;">https://serviceportal.example.de...</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td style="word-break:break-all;">https://serviceportal.example.de/s/faq...</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td style="word-break:break-all;">https://example.file.force.com/file-asset-public/OSP?oid=00D2p00...</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td style="word-break:break-all;">https://serviceportal.example.de/datenschutz-abo...</td><td class="">0/100</td><td><em>Clean</em></td></tr>
+        <tr><td style="word-break:break-all;">https://serviceportal.example.example...</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td style="word-break:break-all;">https://serviceportal.example.example/s/faq...</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td style="word-break:break-all;">https://example.file.force.example/file-asset-public/OSP?oid=00D2p00...</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td style="word-break:break-all;">https://serviceportal.example.example/datenschutz-abo...</td><td class="">0/100</td><td><em>Clean</em></td></tr>
     </table>
 
-    <h2>🤖 KI-Bewertung</h2>
+    <h2>🤖#129302; KI-Bewertung</h2>
     <div class="section">
         <pre>### Risikobewertung: HIGH
 
@@ -285,7 +285,7 @@ Durch diese Maßnahmen kann das Risiko minimiert werden und eventuelle Angriffe 
     <h2>🎯 IOCs (MISP-ready)</h2>
     <pre>{
   "email-src": [
-    "noreply@kundenservice.example.de"
+    "noreply@kundenservice.example.example"
   ],
   "ip-src": [
     "XXX.198.173.134",
@@ -293,15 +293,15 @@ Durch diese Maßnahmen kann das Risiko minimiert werden und eventuelle Angriffe 
     "XXX.7.0.201"
   ],
   "url": [
-    "https://serviceportal.example.de/datenschutz-abo",
-    "https://serviceportal.example.de",
-    "https://example.file.force.com/file-asset-public/OSP?oid=00D2p0000013rIm",
-    "https://serviceportal.example.de/s/faq"
+    "https://serviceportal.example.example/datenschutz-abo",
+    "https://serviceportal.example.example",
+    "https://example.file.force.example/file-asset-public/OSP?oid=00D2p0000013rIm",
+    "https://serviceportal.example.example/s/faq"
   ],
   "domain": [
-    "serviceportal.example.de",
-    "serviceportal.example.de",
-    "example.file.force.com"
+    "serviceportal.example.example",
+    "serviceportal.example.example",
+    "example.file.force.example"
   ]
 }</pre>
 
