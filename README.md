@@ -72,59 +72,68 @@ CAPE Mailer automatisiert den kompletten Workflow der verdächtigen E-Mail-Analy
 
 ### 2.1 Architektur-Diagramm
 
+![CAPE-Mailer Architektur](docs/cape-mailer-architecture.svg)
+
+<details>
+<summary>Mermaid-Diagramm (klicken zum Ausklappen)</summary>
+
+```mermaid
+flowchart TB
+    subgraph INPUT["EMAIL-EINGABE"]
+        IMAP[IMAP Server<br/>malware@mpauli.de]
+        PWD[Passwort-Extraktion<br/>aus Mail-Body]
+        ATTACH[Anhänge<br/>EXE, DLL, ZIP, 7z, RAR<br/>DOC, PDF, EML, MSG]
+    end
+
+    subgraph PROCESS["VERARBEITUNG"]
+        UNZIP[Archiv-Entpackung<br/>AES-ZIP, 7z, RAR<br/>Auto-Passwort]
+        PHISH[Phishing-Analyse<br/>SPF/DKIM/DMARC<br/>ARC, TLS]
+        BANK[Banking-Check<br/>CEO-Fraud<br/>Typosquatting]
+        URL[URL-Analyse<br/>via Tor Proxy]
+    end
+
+    subgraph OSINT["MULTI-SOURCE OSINT"]
+        VT[VirusTotal]
+        ABUSE[AbuseIPDB]
+        OTX[AlienVault OTX]
+        SAFE[Google SafeBrowsing]
+        SPAM[Spamhaus]
+        URLSCAN[URLScan.io]
+    end
+
+    subgraph SANDBOX["CAPE SANDBOX"]
+        EXEC[Sandbox Execution<br/>Windows 10/11 VMs]
+        BEHAV[Behavioral Analysis<br/>200+ Malware-Familien]
+    end
+
+    subgraph AI["KI-BEWERTUNG"]
+        LLM[Ollama LLM<br/>Context-Aware]
+        RAG[Ghidra + RAG<br/>FOR610 Knowledge]
+    end
+
+    subgraph OUTPUT["AUSGABE"]
+        HTML[HTML Report<br/>Ampel-System]
+        MAIL[Email Response<br/>Auto-Reply]
+        MISP[MISP Export<br/>IOC Sharing]
+        SPLUNK[Splunk Logs<br/>JSON Format]
+    end
+
+    INPUT --> PROCESS
+    PWD --> UNZIP
+    PROCESS --> OSINT
+    PROCESS --> SANDBOX
+    OSINT --> AI
+    SANDBOX --> AI
+    AI --> OUTPUT
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                     CAPE Mailer Pipeline (v2.4.2)                      │
-├────────────────────────────────────────────────────────────────────────┤
-│                                                                        │
-│   ┌─────────────────┐                                                  │
-│   │  Mitarbeiter    │                                                  │
-│   │  sendet E-Mail  │──────────┐                                       │
-│   └─────────────────┘          │                                       │
-│                                ▼                                       │
-│   ┌─────────────────────────────────────────────────────────┐         │
-│   │              IMAP Server (10.1.1.11)                    │         │
-│   │              Mailbox: malware@mpauli.de                 │         │
-│   └───────────────────────────┬─────────────────────────────┘         │
-│                               │                                        │
-│                               ▼                                        │
-│   ┌─────────────────────────────────────────────────────────┐         │
-│   │              CAPE Mailer (Timer: 60s)                   │         │
-│   │              /opt/cape-mailer/bin/cape_mailer.py        │         │
-│   └───────────────┬────────────────────────┬────────────────┘         │
-│                   │                        │                           │
-│         ┌─────────┴─────────┐    ┌─────────┴─────────┐                │
-│         │  EML/MSG-Datei?   │    │  Andere Dateien?  │                │
-│         │  (Phishing-Pfad)  │    │  (Malware-Pfad)   │                │
-│         └─────────┬─────────┘    └─────────┬─────────┘                │
-│                   │                        │                           │
-│                   ▼                        ▼                           │
-│   ┌──────────────────────────┐   ┌──────────────────────────┐         │
-│   │    Phishing-Analyse      │   │    CAPE Sandbox          │         │
-│   ├──────────────────────────┤   ├──────────────────────────┤         │
-│   │ • Header-Analyse         │   │ • Dynamische Analyse     │         │
-│   │ • SPF/DKIM/DMARC         │   │ • API-Monitoring         │         │
-│   │ • URL-Extraktion         │   │ • Netzwerk-Capture       │         │
-│   │ • OSINT-Checks           │   │ • Memory-Dumps           │         │
-│   │ • Ollama LLM-Bewertung   │   │ • Ghidra-Analyse         │         │
-│   └──────────────┬───────────┘   └──────────────┬───────────┘         │
-│                  │                              │                      │
-│                  └──────────────┬───────────────┘                      │
-│                                 ▼                                      │
-│   ┌─────────────────────────────────────────────────────────┐         │
-│   │                  Ampel-Bewertung                         │         │
-│   │  🟢 CLEAN (0-1.9)  🟡 VERDÄCHTIG (2-4.9)  🔴 MALICIOUS (5+) │         │
-│   └───────────────────────────┬─────────────────────────────┘         │
-│                               │                                        │
-│              ┌────────────────┼────────────────┐                      │
-│              ▼                ▼                ▼                      │
-│   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐             │
-│   │ HTML-Report  │   │ MISP-Event   │   │ Splunk-Log   │             │
-│   │ per E-Mail   │   │ (wenn ROT)   │   │ (JSON)       │             │
-│   └──────────────┘   └──────────────┘   └──────────────┘             │
-│                                                                        │
-└────────────────────────────────────────────────────────────────────────┘
-```
+</details>
+
+**Zentrale Features:**
+- **Email-Eingabe**: Automatischer IMAP-Abruf mit Passwort-Extraktion aus dem Mail-Body
+- **Archiv-Handling**: ZIP (AES-verschlüsselt), 7z, RAR mit automatischem Passwort-Versuch
+- **Phishing-Analyse**: Multi-Source Auth-Header-Parsing (SPF/DKIM/DMARC/ARC)
+- **OSINT-Enrichment**: 6+ Threat Intelligence Quellen
+- **KI-Bewertung**: Ollama LLM mit OSINT-Context für präzise Risikobewertung
 
 ### 2.2 Systemkomponenten
 
@@ -778,6 +787,8 @@ CEO_FRAUD_KEYWORDS = [
 
 | Version | Datum | Autor | Änderung |
 |---------|-------|-------|----------|
+| 1.2 | 2026-01-23 | IcePorge | SVG-Architekturdiagramm, Mermaid-Diagramm, TruffleHog Security-Scan Integration |
+| 1.1 | 2026-01-22 | IcePorge | Secret-Maskierung für GitHub-Push, Git-History-Bereinigung |
 | 1.0 | 2026-01-19 | IT-Sicherheit | Initiale Erstellung |
 
 ---

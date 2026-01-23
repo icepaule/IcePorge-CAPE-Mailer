@@ -1,9 +1,5 @@
 <!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Phishing-Analyse Report - SAMPLE016193dc</title>
-    <style>
+<html><head><meta charset="UTF-8"><title>Phishing-Analyse Report - SAMPLE016193dc</title><style>
         body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #f5f5f5; }
         .container { max-width: 1200px; margin: auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         h1 { color: #333; border-bottom: 3px solid #dc3545; padding-bottom: 10px; }
@@ -23,16 +19,14 @@
         .section { margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 5px; }
         .info-badge { display: inline-block; background: #17a2b8; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-left: 5px; }
         .sample-notice { background: #e7f3ff; border: 1px solid #0066cc; padding: 10px; border-radius: 5px; margin-bottom: 20px; }
-    </style>
-</head>
-<body>
+    </style></head><body>
 <div class="container">
     <div class="sample-notice">
-        <strong>📋#128203; Sample Report</strong> - This is an anonymized example report for documentation purposes.
+        <strong>&#128203; Sample Report</strong> - This is an anonymized example report for documentation purposes.
         Domains and IP addresses have been masked for GDPR compliance.
     </div>
 
-    <h1>🔴#128308; Phishing-Analyse Report</h1>
+    <h1>&#128308; Phishing-Analyse Report</h1>
 
     <div class="verdict">
         Verdict: MALICIOUS
@@ -43,7 +37,7 @@
     <strong>Zeitstempel:</strong> 2026-01-22T16:16:23.520135<br>
     <strong>Quelldatei:</strong> message.eml</p>
 
-    <h2>📧#128231; Header-Analyse</h2>
+    <h2>&#128231; Header-Analyse</h2>
     <table>
         <tr><th>Feld</th><th>Wert</th></tr>
         <tr><td>Von</td><td>noreply@kundenservice.example.example</td></tr>
@@ -54,7 +48,7 @@
         <tr><td>Originating IP</td><td>XXX.198.173.134</td></tr>
     </table>
 
-    <h3>🔐 Authentifizierung <span class="info-badge">Multi-Source</span></h3>
+    <h3>&#128272; Authentifizierung <span class="info-badge">Multi-Source</span></h3>
     <table>
         <tr><th>Check</th><th>Ergebnis</th><th>Quelle</th></tr>
         <tr><td>SPF</td><td class="">none</td><td>none</td></tr>
@@ -62,7 +56,7 @@
         <tr><td>DMARC</td><td class="">none</td><td>none</td></tr>
     </table>
 
-    <h3>🛡️#128737; Mail-Routing-Analyse <span class="info-badge">TLS/Cipher-Check</span></h3>
+    <h3>&#128737; Mail-Routing-Analyse <span class="info-badge">TLS/Cipher-Check</span></h3>
     <table>
         <tr><th>#</th><th>From Server</th><th>To Server</th><th>IPs</th><th>TLS</th><th>Cipher</th></tr>
 
@@ -139,8 +133,8 @@
         </tr>
 
     </table>
-    <p><strong>TLS Encryption:</strong> &check; Ja |
-       <strong>ARC Headers:</strong> &cross; Nein</p>
+    <p><strong>TLS Encryption:</strong> &amp;check; Ja |
+       <strong>ARC Headers:</strong> &amp;cross; Nein</p>
     <p class="risk-high"><strong>&#9888; Security Issues:</strong> No ARC headers in multi-hop chain</p>
 
     <h3>&#9888; Anomalien</h3>
@@ -148,12 +142,12 @@
         <em>Keine Anomalien erkannt</em>
     </div>
 
-    <h3>🛡️#128737; Security-Systeme in der Kette</h3>
+    <h3>&#128737; Security-Systeme in der Kette</h3>
     <div class="section">
         <span class="tag">sophos</span><span class="tag">barracuda</span><span class="tag">cisco_esa</span><span class="tag">microsoft_atp</span><span class="tag">google</span><span class="tag">spamassassin</span><span class="tag">exim</span>
     </div>
 
-    <h2>🔧#128295; Security-Recommendations für Mail-Gateway-Tuning</h2>
+    <h2>&#128295; Security-Recommendations für Mail-Gateway-Tuning</h2>
 
         <div class="recommendation" style="border-left: 4px solid #ffc107; margin: 10px 0; padding: 10px; background: #f8f9fa;">
             <strong style="color: #ffc107;">Mail Gateway (SPF)</strong>
@@ -190,19 +184,19 @@ config_rspamd: dmarc { enabled = true; }
             <p><strong>Issue:</strong> No ARC (Authenticated Received Chain) headers</p>
             <p><strong>Recommendation:</strong> Enable ARC sealing to preserve authentication through forwarding</p>
             <pre style="background: white; padding: 8px; font-size: 11px; overflow-x: auto;">
-config_exchange: Set-TransportConfig -ARCTrustedSealers @{Add="domain.example"}
-config_rspamd: arc { enabled = true; mode = "sign"; }
+config_exchange: Set-TransportConfig -ARCTrustedSealers @{Add=&quot;domain.example&quot;}
+config_rspamd: arc { enabled = true; mode = &quot;sign&quot;; }
             </pre>
         </div>
 
 
-    <h2>🔗#128279; URL-Analyse (4 URLs)</h2>
+    <h2>&#128279; URL-Analyse (4 URLs)</h2>
     <table>
         <tr><th>URL</th><th>Erreichbar</th><th>Login-Form</th><th>Typosquatting</th><th>Score</th></tr>
-        <tr><td style='word-break:break-all;'>https://serviceportal.example.example/datenschutz-abo...</td><td>&cross;</td><td>-</td><td>-</td><td>0</td></tr><tr><td style='word-break:break-all;'>https://serviceportal.example.example...</td><td>&cross;</td><td>-</td><td>-</td><td>0</td></tr><tr><td style='word-break:break-all;'>https://example.file.force.example/file-asset-public/OSP?oid=00D2p0000013rIm...</td><td>&cross;</td><td>-</td><td>-</td><td>0</td></tr><tr><td style='word-break:break-all;'>https://serviceportal.example.example/s/faq...</td><td>&cross;</td><td>-</td><td>-</td><td>0</td></tr>
+        <tr><td style="word-break:break-all;">https://serviceportal.example.example/datenschutz-abo...</td><td>&amp;cross;</td><td>-</td><td>-</td><td>0</td></tr><tr><td style="word-break:break-all;">https://serviceportal.example.example...</td><td>&amp;cross;</td><td>-</td><td>-</td><td>0</td></tr><tr><td style="word-break:break-all;">https://example.file.force.example/file-asset-public/OSP?oid=00D2p0000013rIm...</td><td>&amp;cross;</td><td>-</td><td>-</td><td>0</td></tr><tr><td style="word-break:break-all;">https://serviceportal.example.example/s/faq...</td><td>&amp;cross;</td><td>-</td><td>-</td><td>0</td></tr>
     </table>
 
-    <h2>📝#128221; Inhaltsanalyse</h2>
+    <h2>&#128221; Inhaltsanalyse</h2>
     <table>
         <tr><th>Indikator</th><th>Wert</th></tr>
         <tr><td>Extrahierte URLs</td><td>4</td></tr>
@@ -214,7 +208,7 @@ config_rspamd: arc { enabled = true; mode = "sign"; }
     </table>
 
 
-    <h2>🔍 OSINT Threat Intelligence <span class="info-badge">v2.4.1</span></h2>
+    <h2>&eth;&#159;&#148;&#141; OSINT Threat Intelligence <span class="info-badge">v2.4.1</span></h2>
     <div class="verdict" style="border-color: #28a745;">
         Threat Level: LOW
         <span style="float:right;">0 High-Confidence Threats</span>
@@ -222,48 +216,48 @@ config_rspamd: arc { enabled = true; mode = "sign"; }
 
 
 
-    <h3>🌐 IP Reputation (3 IPs)</h3>
+    <h3>&eth;&#159;&#140;&#144; IP Reputation (3 IPs)</h3>
     <table>
         <tr><th>IP</th><th>Threat Score</th><th>Threat Indicators</th></tr>
         <tr><td>XXX.198.173.134</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td>XXX.7.0.201</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td>XXX.85.208.71</td><td class="">0/100</td><td><em>Clean</em></td></tr>
     </table>
 
-    <h3>🏷️ Domain Reputation (3 Domains)</h3>
+    <h3>&#127919; Domain Reputation (3 Domains)</h3>
     <table>
         <tr><th>Domain</th><th>Threat Score</th><th>Threat Indicators</th></tr>
         <tr><td>example.file.force.example</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td>serviceportal.example.example</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td>serviceportal.example.example</td><td class="">0/100</td><td><em>Clean</em></td></tr>
     </table>
 
-    <h3>🔗#128279; URL Reputation (4 URLs)</h3>
+    <h3>&#128279; URL Reputation (4 URLs)</h3>
     <table>
         <tr><th>URL</th><th>Threat Score</th><th>Threat Indicators</th></tr>
         <tr><td style="word-break:break-all;">https://serviceportal.example.example...</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td style="word-break:break-all;">https://serviceportal.example.example/s/faq...</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td style="word-break:break-all;">https://example.file.force.example/file-asset-public/OSP?oid=00D2p00...</td><td class="">0/100</td><td><em>Clean</em></td></tr><tr><td style="word-break:break-all;">https://serviceportal.example.example/datenschutz-abo...</td><td class="">0/100</td><td><em>Clean</em></td></tr>
     </table>
 
-    <h2>🤖#129302; KI-Bewertung</h2>
+    <h2>&#129302; KI-Bewertung</h2>
     <div class="section">
         <pre>### Risikobewertung: HIGH
 
 **Begründung:**
 
 1. **Header-Authentizität**
-   - SPF/DKIM/DMARC Ergebnisse sind alle "none", was ungewöhnlich ist für eine offizielle E-Mail.
+   - SPF/DKIM/DMARC Ergebnisse sind alle &quot;none&quot;, was ungew&Atilde;&para;hnlich ist für eine offizielle E-Mail.
    - Es gibt Routing-Probleme und keine ARC-Headers, was die Echtheit fragwürdig macht.
 
 2. **Absender-Legitimität**
-   - Die Domain scheint nicht bekannt oder legitim zu sein. Typosquatting-Versuche können nicht ausgeschlossen werden.
-   - Der Display-Name passt nicht zur tatsächlichen Adresse und beinhaltet den Begriff "geschäftsführer", was CEO-Fraud vermuten lässt.
+   - Die Domain scheint nicht bekannt oder legitim zu sein. Typosquatting-Versuche k&Atilde;&para;nnen nicht ausgeschlossen werden.
+   - Der Display-Name passt nicht zur tatsächlichen Adresse und beinhaltet den Begriff &quot;geschäftsführer&quot;, was CEO-Fraud vermuten lässt.
 
 3. **URL-Verdächtigkeit**
    - Es gibt 4 URLs, die weiter analysiert werden sollten. Keine Verdächtigen URL-Domains wurden erkannt, aber das fehlende HTTPS kann ein Indikator für Sicherheitsprobleme sein.
 
 4. **Social Engineering Taktiken**
-   - Der Betreff und der Inhalt betonen Dringlichkeit und autoritäre Anordnungen ("sofort", "geschäftsführer"), was typisch für Phishing-E-Mails ist.
+   - Der Betreff und der Inhalt betonen Dringlichkeit und autoritäre Anordnungen (&quot;sofort&quot;, &quot;geschäftsführer&quot;), was typisch für Phishing-E-Mails ist.
    - Es gibt keine expliziten Drohungen, aber die verlangte Reaktion kann als unter Druck gesetzt erscheinen.
 
 5. **Banking-spezifische Risiken**
-   - Die Anwähnung des Begriffs "geschäftsführer" und der Verwendung von "ING" (eine bekannte Bank) deutet auf einen Banking-Phishing-Versuch hin.
-   - Es gibt keine spezifischen Indikatoren für SEPA/IBAN-Manipulation oder Zahlungsaufforderungen, aber die Kontextierung des E-Mails macht das Risiko erhöht.
+   - Die Anwähnung des Begriffs &quot;geschäftsführer&quot; und der Verwendung von &quot;ING&quot; (eine bekannte Bank) deutet auf einen Banking-Phishing-Versuch hin.
+   - Es gibt keine spezifischen Indikatoren für SEPA/IBAN-Manipulation oder Zahlungsaufforderungen, aber die Kontextierung des E-Mails macht das Risiko erh&Atilde;&para;ht.
 
 6. **Technische Indikatoren**
    - Keine technischen Indikatoren wie Tracking-Pixel, verdächtige Anhänge oder eingebettete Formulare wurden erkannt.
@@ -275,33 +269,33 @@ config_rspamd: arc { enabled = true; mode = "sign"; }
 **Handlungsempfehlungen für das SOC-Team:**
 
 1. **Anpassung der E-Mail-Bewertung:** Da die E-Mail mehrere starke Phishing-Indikatoren aufweist, sollte sie an den entsprechenden Prozess zur Phishing-Erkennung weitergeleitet werden.
-2. **Benachrichtigung des Empfängers:** Der Empfänger der E-Mail sollte unverzüglich über das Potenzielle Risiko informiert und zur Überprüfung auf gefährliche Links oder Anhänge aufgefordert werden.
-3. **Verifikation der Kontaktdaten:** Stellen Sie sicher, dass alle bereitgestellten Kontaktinformationen (einschließlich URLs) mit offiziellen Quellen verifiziert sind.
-4. **Überprüfung weiterer E-Mails:** Überprüfen Sie die gesamte Kommunikationshistorie des Empfängers auf ähnliche Phishing-Angriffe und möglichen Manipulationen.
+2. **Benachrichtigung des Empfängers:** Der Empfänger der E-Mail sollte unverzüglich über das Potenzielle Risiko informiert und zur &Atilde;&#156;berprüfung auf gefährliche Links oder Anhänge aufgefordert werden.
+3. **Verifikation der Kontaktdaten:** Stellen Sie sicher, dass alle bereitgestellten Kontaktinformationen (einschlie&Atilde;&#159;lich URLs) mit offiziellen Quellen verifiziert sind.
+4. **&Atilde;&#156;berprüfung weiterer E-Mails:** &Atilde;&#156;berprüfen Sie die gesamte Kommunikationshistorie des Empfängers auf ähnliche Phishing-Angriffe und m&Atilde;&para;glichen Manipulationen.
 
-Durch diese Maßnahmen kann das Risiko minimiert werden und eventuelle Angriffe schnell erkannt und abgefangen werden.</pre>
+Durch diese Ma&Atilde;&#159;nahmen kann das Risiko minimiert werden und eventuelle Angriffe schnell erkannt und abgefangen werden.</pre>
     </div>
 
-    <h2>🎯 IOCs (MISP-ready)</h2>
+    <h2>&eth;&#159;&#142;&macr; IOCs (MISP-ready)</h2>
     <pre>{
-  "email-src": [
-    "noreply@kundenservice.example.example"
+  &quot;email-src&quot;: [
+    &quot;noreply@kundenservice.example.example&quot;
   ],
-  "ip-src": [
-    "XXX.198.173.134",
-    "XXX.85.208.71",
-    "XXX.7.0.201"
+  &quot;ip-src&quot;: [
+    &quot;XXX.198.173.134&quot;,
+    &quot;XXX.85.208.71&quot;,
+    &quot;XXX.7.0.201&quot;
   ],
-  "url": [
-    "https://serviceportal.example.example/datenschutz-abo",
-    "https://serviceportal.example.example",
-    "https://example.file.force.example/file-asset-public/OSP?oid=00D2p0000013rIm",
-    "https://serviceportal.example.example/s/faq"
+  &quot;url&quot;: [
+    &quot;https://serviceportal.example.example/datenschutz-abo&quot;,
+    &quot;https://serviceportal.example.example&quot;,
+    &quot;https://example.file.force.example/file-asset-public/OSP?oid=00D2p0000013rIm&quot;,
+    &quot;https://serviceportal.example.example/s/faq&quot;
   ],
-  "domain": [
-    "serviceportal.example.example",
-    "serviceportal.example.example",
-    "example.file.force.example"
+  &quot;domain&quot;: [
+    &quot;serviceportal.example.example&quot;,
+    &quot;serviceportal.example.example&quot;,
+    &quot;example.file.force.example&quot;
   ]
 }</pre>
 
@@ -309,8 +303,7 @@ Durch diese Maßnahmen kann das Risiko minimiert werden und eventuelle Angriffe 
     <p style="color:#666; font-size:12px;">
         Generiert von CAPE Phishing Analyzer v2.4.1 (OSINT Integration) (Multi-Source Auth + Routing-Analyse)<br>
         2026-01-22 16:17:17<br>
-        <em>Note: This sample report has been anonymized for documentation purposes (domains → example.*, IPs → XXX.*)</em>
+        <em>Note: This sample report has been anonymized for documentation purposes (domains &acirc;&#134;&#146; example.*, IPs &acirc;&#134;&#146; XXX.*)</em>
     </p>
 </div>
-</body>
-</html>
+</body></html>

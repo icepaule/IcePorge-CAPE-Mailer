@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 750" style="background-color: #1a1a2e;">
+  <defs>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0983D3;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#06527a;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#28a745;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1e7e34;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6f42c1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#4a235a;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="orangeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fd7e14;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#c55a00;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="redGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#dc3545;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#a71d2a;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#17a2b8;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#117a8b;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.3"/>
+    </filter>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+      <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Title -->
+  <text x="450" y="35" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-size="20" font-weight="bold">CAPE-Mailer - Email-basierte Malware-Analyse</text>
+  <text x="450" y="55" text-anchor="middle" fill="#888" font-family="Arial, sans-serif" font-size="12">Automatisierte Phishing-Erkennung &amp; Attachment-Analyse</text>
+
+  <!-- EMAIL INPUT Section (Highlighted) -->
+  <rect x="50" y="70" width="350" height="160" rx="10" fill="#2d2d44" stroke="#fd7e14" stroke-width="3" filter="url(#glow)"/>
+  <text x="225" y="95" text-anchor="middle" fill="#fd7e14" font-family="Arial, sans-serif" font-size="14" font-weight="bold">EMAIL-EINGABE</text>
+
+  <!-- IMAP Box -->
+  <rect x="70" y="110" width="140" height="50" rx="6" fill="url(#orangeGrad)" filter="url(#shadow)"/>
+  <text x="140" y="135" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="11" font-weight="bold">IMAP Server</text>
+  <text x="140" y="150" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">malware@mpauli.de</text>
+
+  <!-- Attachment Types -->
+  <rect x="230" y="110" width="150" height="110" rx="6" fill="#3d3d54" stroke="#fd7e14" stroke-width="1"/>
+  <text x="305" y="128" text-anchor="middle" fill="#fd7e14" font-family="Arial, sans-serif" font-size="10" font-weight="bold">Unterstützte Anhänge</text>
+  <text x="305" y="145" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">EXE, DLL, PS1, BAT, VBS</text>
+  <text x="305" y="160" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">DOC(X/M), XLS(X/M), PDF</text>
+  <text x="305" y="175" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">ZIP, 7z, RAR, ISO</text>
+  <text x="305" y="190" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">EML, MSG (rekursiv)</text>
+  <text x="305" y="208" text-anchor="middle" fill="#28a745" font-family="Arial, sans-serif" font-size="8">Magic Bytes Detection</text>
+
+  <!-- Password Extraction (Highlighted Feature) -->
+  <rect x="70" y="170" width="140" height="50" rx="6" fill="url(#redGrad)" filter="url(#shadow)"/>
+  <text x="140" y="192" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="10" font-weight="bold">Passwort-Extraktion</text>
+  <text x="140" y="208" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="8">aus Mail-Body (Regex)</text>
+
+  <!-- PROCESSING Section -->
+  <rect x="420" y="70" width="430" height="160" rx="10" fill="#2d2d44" stroke="#28a745" stroke-width="2" filter="url(#shadow)"/>
+  <text x="635" y="95" text-anchor="middle" fill="#28a745" font-family="Arial, sans-serif" font-size="14" font-weight="bold">VERARBEITUNG</text>
+
+  <!-- Archive Extraction -->
+  <rect x="440" y="110" width="130" height="55" rx="6" fill="url(#greenGrad)" filter="url(#shadow)"/>
+  <text x="505" y="132" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="10" font-weight="bold">Archiv-Entpackung</text>
+  <text x="505" y="148" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="8">AES-ZIP, 7z, RAR</text>
+  <text x="505" y="160" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="8">Auto-Passwort-Versuch</text>
+
+  <!-- Phishing Analysis -->
+  <rect x="585" y="110" width="130" height="55" rx="6" fill="url(#cyanGrad)" filter="url(#shadow)"/>
+  <text x="650" y="132" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="10" font-weight="bold">Phishing-Analyse</text>
+  <text x="650" y="148" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="8">SPF/DKIM/DMARC</text>
+  <text x="650" y="160" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="8">ARC, TLS, Cipher</text>
+
+  <!-- Banking Checks -->
+  <rect x="730" y="110" width="105" height="55" rx="6" fill="url(#redGrad)" filter="url(#shadow)"/>
+  <text x="782" y="132" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="10" font-weight="bold">Banking-Check</text>
+  <text x="782" y="148" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="8">CEO-Fraud</text>
+  <text x="782" y="160" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="8">Typosquatting</text>
+
+  <!-- URL Analysis -->
+  <rect x="440" y="175" width="200" height="45" rx="6" fill="url(#purpleGrad)" filter="url(#shadow)"/>
+  <text x="540" y="195" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="10" font-weight="bold">URL-Analyse via Tor</text>
+  <text x="540" y="210" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="8">SOCKS5 Proxy - Anonyme Prüfung</text>
+
+  <!-- Arrows -->
+  <path d="M 400 150 L 420 150" stroke="#28a745" stroke-width="2" fill="none"/>
+  <polygon points="425,150 415,145 415,155" fill="#28a745"/>
+
+  <!-- OSINT Section -->
+  <rect x="50" y="250" width="800" height="100" rx="10" fill="#2d2d44" stroke="#17a2b8" stroke-width="2" filter="url(#shadow)"/>
+  <text x="450" y="275" text-anchor="middle" fill="#17a2b8" font-family="Arial, sans-serif" font-size="14" font-weight="bold">MULTI-SOURCE OSINT ENRICHMENT</text>
+
+  <!-- OSINT Sources -->
+  <rect x="70" y="290" width="100" height="45" rx="4" fill="url(#cyanGrad)"/>
+  <text x="120" y="312" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="10" font-weight="bold">VirusTotal</text>
+  <text x="120" y="326" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="8">Multi-AV Scan</text>
+
+  <rect x="185" y="290" width="100" height="45" rx="4" fill="url(#cyanGrad)"/>
+  <text x="235" y="312" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="10" font-weight="bold">AbuseIPDB</text>
+  <text x="235" y="326" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="8">IP Reputation</text>
+
+  <rect x="300" y="290" width="100" height="45" rx="4" fill="url(#cyanGrad)"/>
+  <text x="350" y="312" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="10" font-weight="bold">AlienVault</text>
+  <text x="350" y="326" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="8">OTX Pulses</text>
+
+  <rect x="415" y="290" width="115" height="45" rx="4" fill="url(#cyanGrad)"/>
+  <text x="472" y="312" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="10" font-weight="bold">SafeBrowsing</text>
+  <text x="472" y="326" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="8">Google API</text>
+
+  <rect x="545" y="290" width="100" height="45" rx="4" fill="url(#cyanGrad)"/>
+  <text x="595" y="312" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="10" font-weight="bold">Spamhaus</text>
+  <text x="595" y="326" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="8">DNS Blacklist</text>
+
+  <rect x="660" y="290" width="100" height="45" rx="4" fill="url(#cyanGrad)"/>
+  <text x="710" y="312" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="10" font-weight="bold">URLScan.io</text>
+  <text x="710" y="326" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="8">URL Analysis</text>
+
+  <!-- Arrow down -->
+  <path d="M 450 350 L 450 370" stroke="#28a745" stroke-width="2" fill="none"/>
+  <polygon points="450,375 445,365 455,365" fill="#28a745"/>
+
+  <!-- CAPE SANDBOX Section -->
+  <rect x="50" y="380" width="400" height="140" rx="10" fill="#2d2d44" stroke="#28a745" stroke-width="2" filter="url(#shadow)"/>
+  <text x="250" y="405" text-anchor="middle" fill="#28a745" font-family="Arial, sans-serif" font-size="14" font-weight="bold">CAPE SANDBOX - Dynamische Analyse</text>
+
+  <rect x="70" y="420" width="170" height="85" rx="6" fill="url(#greenGrad)" filter="url(#shadow)"/>
+  <text x="155" y="445" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="11" font-weight="bold">Sandbox Execution</text>
+  <text x="155" y="462" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Windows 10/11 VMs</text>
+  <text x="155" y="477" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">200+ Malware-Familien</text>
+  <text x="155" y="492" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Config Extraction</text>
+
+  <rect x="260" y="420" width="170" height="85" rx="6" fill="url(#greenGrad)" filter="url(#shadow)"/>
+  <text x="345" y="445" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="11" font-weight="bold">Behavioral Analysis</text>
+  <text x="345" y="462" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Syscall Monitoring</text>
+  <text x="345" y="477" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Network Capture</text>
+  <text x="345" y="492" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">C2 Detection</text>
+
+  <!-- AI ANALYSIS Section -->
+  <rect x="470" y="380" width="380" height="140" rx="10" fill="#2d2d44" stroke="#6f42c1" stroke-width="2" filter="url(#shadow)"/>
+  <text x="660" y="405" text-anchor="middle" fill="#6f42c1" font-family="Arial, sans-serif" font-size="14" font-weight="bold">KI-GESTÜTZTE BEWERTUNG</text>
+
+  <rect x="490" y="420" width="160" height="85" rx="6" fill="url(#purpleGrad)" filter="url(#shadow)"/>
+  <text x="570" y="445" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="11" font-weight="bold">Ollama LLM</text>
+  <text x="570" y="462" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Context-Aware Analysis</text>
+  <text x="570" y="477" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">OSINT-Enhanced Prompt</text>
+  <text x="570" y="492" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Risk Assessment</text>
+
+  <rect x="670" y="420" width="160" height="85" rx="6" fill="url(#purpleGrad)" filter="url(#shadow)"/>
+  <text x="750" y="445" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="11" font-weight="bold">Ghidra + RAG</text>
+  <text x="750" y="462" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Static Decompilation</text>
+  <text x="750" y="477" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">FOR610 Knowledge</text>
+  <text x="750" y="492" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">MITRE ATT&amp;CK</text>
+
+  <!-- Arrow down -->
+  <path d="M 450 520 L 450 545" stroke="#0983D3" stroke-width="2" fill="none"/>
+  <polygon points="450,550 445,540 455,540" fill="#0983D3"/>
+
+  <!-- OUTPUT Section -->
+  <rect x="50" y="555" width="800" height="170" rx="10" fill="#2d2d44" stroke="#0983D3" stroke-width="2" filter="url(#shadow)"/>
+  <text x="450" y="580" text-anchor="middle" fill="#0983D3" font-family="Arial, sans-serif" font-size="14" font-weight="bold">AUSGABE &amp; REPORTING</text>
+
+  <rect x="70" y="595" width="170" height="115" rx="6" fill="url(#blueGrad)" filter="url(#shadow)"/>
+  <text x="155" y="618" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="11" font-weight="bold">HTML Report</text>
+  <text x="155" y="638" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Ampel-System</text>
+  <text x="155" y="653" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Executive Summary</text>
+  <text x="155" y="668" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">OSINT Threat Intel</text>
+  <text x="155" y="683" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">IOC List</text>
+  <text x="155" y="698" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Security Recommendations</text>
+
+  <rect x="260" y="595" width="140" height="115" rx="6" fill="url(#blueGrad)" filter="url(#shadow)"/>
+  <text x="330" y="618" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="11" font-weight="bold">Email Response</text>
+  <text x="330" y="638" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Auto-Reply</text>
+  <text x="330" y="653" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Verdict + Score</text>
+  <text x="330" y="668" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">CC: info@mpauli.de</text>
+  <text x="330" y="683" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Processed Folder</text>
+
+  <rect x="420" y="595" width="140" height="115" rx="6" fill="url(#greenGrad)" filter="url(#shadow)"/>
+  <text x="490" y="618" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="11" font-weight="bold">MISP Export</text>
+  <text x="490" y="638" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">IOC Sharing</text>
+  <text x="490" y="653" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">TLP:AMBER</text>
+  <text x="490" y="668" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Dynamic Tags</text>
+  <text x="490" y="683" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Phishing Events</text>
+
+  <rect x="580" y="595" width="130" height="115" rx="6" fill="url(#orangeGrad)" filter="url(#shadow)"/>
+  <text x="645" y="618" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="11" font-weight="bold">Splunk Logs</text>
+  <text x="645" y="638" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">JSON Format</text>
+  <text x="645" y="653" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">SIEM Integration</text>
+  <text x="645" y="668" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Metrics</text>
+
+  <rect x="730" y="595" width="105" height="115" rx="6" fill="url(#purpleGrad)" filter="url(#shadow)"/>
+  <text x="782" y="618" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="11" font-weight="bold">Quarantine</text>
+  <text x="782" y="638" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Sample Archive</text>
+  <text x="782" y="653" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Hash-based</text>
+  <text x="782" y="668" text-anchor="middle" fill="#ddd" font-family="Arial, sans-serif" font-size="9">Retention</text>
+</svg>
