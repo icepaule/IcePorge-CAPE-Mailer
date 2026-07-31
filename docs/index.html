@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IcePorge CAPE-Mailer — E-Mail-getriggerte Malware- &amp; Phishing-Analyse</title>
+<style>
+:root { --primary:#1a56db; --primary-light:#e8effc; --bg:#f8fafc; --card:#ffffff; --text:#1e293b; --text-muted:#64748b; --border:#e2e8f0; --accent:#059669; --accent-light:#ecfdf5; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); line-height:1.6; }
+.container { max-width:1100px; margin:0 auto; padding:0 24px; }
+header { background:linear-gradient(135deg,#1e3a5f 0%,#1a56db 100%); color:white; padding:60px 0 50px; }
+header h1 { font-size:2.5rem; margin-bottom:12px; display:flex; align-items:center; gap:16px; }
+header .icon { width:48px; height:48px; flex-shrink:0; }
+header p { font-size:1.15rem; opacity:0.9; max-width:700px; }
+.badge { display:inline-block; background:rgba(255,255,255,0.2); padding:4px 12px; border-radius:20px; font-size:0.85rem; margin-top:16px; }
+nav { background:var(--card); border-bottom:1px solid var(--border); position:sticky; top:0; box-shadow:0 1px 3px rgba(0,0,0,0.05); }
+nav .container { display:flex; overflow-x:auto; }
+nav a { padding:14px 20px; text-decoration:none; color:var(--text-muted); font-size:0.9rem; font-weight:500; white-space:nowrap; border-bottom:2px solid transparent; }
+nav a:hover { color:var(--primary); border-bottom-color:var(--primary); }
+section { padding:50px 0; }
+section:nth-child(even) { background:var(--card); }
+h2 { font-size:1.8rem; margin-bottom:24px; }
+h3 { font-size:1.2rem; margin:20px 0 12px; }
+.card-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:20px; margin-top:20px; }
+.card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:0 1px 3px rgba(0,0,0,0.04); }
+section:nth-child(even) .card { background:var(--bg); }
+.card h3 { margin-top:0; color:var(--primary); }
+.card p { color:var(--text-muted); font-size:0.95rem; }
+table { width:100%; border-collapse:collapse; margin:16px 0; font-size:0.9rem; }
+th, td { padding:10px 14px; text-align:left; border-bottom:1px solid var(--border); }
+th { background:var(--primary-light); color:var(--primary); font-weight:600; }
+.mermaid-wrap { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; margin:24px 0; overflow-x:auto; }
+section:nth-child(even) .mermaid-wrap { background:var(--bg); }
+pre:not(.mermaid) { background:#1e293b; color:#e2e8f0; padding:20px; border-radius:10px; overflow-x:auto; font-size:0.85rem; }
+code { background:var(--primary-light); padding:2px 6px; border-radius:4px; font-size:0.85rem; }
+pre code { background:none; padding:0; }
+.tech-grid { display:flex; flex-wrap:wrap; gap:12px; margin:20px 0; }
+.tech-item { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:10px 18px; font-size:0.9rem; font-weight:500; }
+section:nth-child(even) .tech-item { background:var(--bg); }
+footer { background:#1e293b; color:#94a3b8; padding:40px 0; text-align:center; font-size:0.85rem; }
+footer a { color:#60a5fa; text-decoration:none; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'default'});</script>
+</head>
+<body>
+
+<header>
+  <div class="container">
+    <h1>
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
+      IcePorge CAPE-Mailer
+    </h1>
+    <p>E-Mail-getriggerte Malware- und Phishing-Analyse: verdächtige Anhänge einfach per Mail einreichen, automatisiert durch CAPE-Sandbox, Multi-Source-OSINT und ein LLM bewerten lassen und als HTML-Report zurückbekommen.</p>
+    <span class="badge">Python 3 · IMAP/SMTP-Poller · CAPEv2-Integration</span>
+  </div>
+</header>
+
+<nav>
+  <div class="container">
+    <a href="#ueberblick">Überblick</a>
+    <a href="#architektur">Architektur</a>
+    <a href="#techstack">Tech-Stack</a>
+    <a href="#quickstart">Quickstart</a>
+  </div>
+</nav>
+
+<section id="ueberblick">
+  <div class="container">
+    <h2>Überblick</h2>
+    <p>CAPE-Mailer ist ein eigenständiges Python-Skript, das per Timer regelmäßig eine IMAP-Mailbox abfragt. Mitarbeiter können verdächtige Dateien (ausführbare Dateien, Skripte, Office-Dokumente, Archive) einfach als Anhang an eine dafür vorgesehene Adresse senden. Je nach Anhangstyp entscheidet das Tool automatisch, ob eine <strong>Malware-Analyse</strong> in einer CAPE-Sandbox oder eine <strong>Phishing-Analyse</strong> von EML/MSG-Dateien durchgeführt wird, reichert die Ergebnisse mit mehreren OSINT-Quellen und einer LLM-Bewertung an und schickt dem Einsender automatisch einen aufbereiteten HTML-Report zurück.</p>
+    <div class="card-grid">
+      <div class="card">
+        <h3>Zwei Analyse-Modi</h3>
+        <p>Ausführbare Dateien, Skripte, Office-Dokumente und Archive gehen in die CAPE-Sandbox (Verhaltensanalyse). E-Mail-Dateien (.eml/.msg) durchlaufen stattdessen eine Header- und Phishing-Analyse (SPF/DKIM/DMARC/ARC).</p>
+      </div>
+      <div class="card">
+        <h3>Passwortgeschützte Archive</h3>
+        <p>ZIP/7z/RAR-Archive werden automatisch entpackt — ein im Mail-Text mitgeschicktes Passwort wird per Regex erkannt, alternativ probiert das Tool eine Liste gängiger Standard-Passwörter.</p>
+      </div>
+      <div class="card">
+        <h3>Multi-Source OSINT</h3>
+        <p>IPs, Domains und URLs werden gegen mehrere Threat-Intelligence-Quellen abgeglichen (Reputation, Sichtungen, Multi-Engine-Scans), URL-Prüfungen laufen über einen Tor-Proxy zum Schutz der Analysten-IP.</p>
+      </div>
+      <div class="card">
+        <h3>KI-gestützte Bewertung</h3>
+        <p>Ein lokal gehostetes LLM bewertet die gesammelten Befunde kontextbezogen und liefert eine textuelle Risikoeinschätzung, die zusammen mit einem Ampel-System (grün/gelb/rot) in den Report einfließt.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="architektur">
+  <div class="container">
+    <h2>Architektur</h2>
+    <p>Ein Timer stößt das Skript in festem Intervall an. Es holt neue Mails per IMAP ab, klassifiziert die Anhänge, verteilt sie an die passende Analyse-Pipeline, reichert die Ergebnisse mit OSINT-Daten und einer LLM-Bewertung an und erzeugt daraus einen HTML-Report, der per SMTP an den Einsender zurückgeht. Kritische Funde können optional als strukturiertes Threat-Intelligence-Event exportiert werden.</p>
+    <div class="mermaid-wrap">
+      <pre class="mermaid">
+flowchart TB
+    TIMER[Scheduler / Timer] -->|startet Lauf| MAILER[CAPE-Mailer Prozess]
+    MAILER -->|IMAP Poll| INBOX[Mailbox: Analyse-Anfragen]
+    INBOX --> CLASSIFY{Anhangstyp?}
+
+    CLASSIFY -->|EXE / Script / Office / Archiv| UNPACK[Archiv-Entpackung<br/>Passwort aus Mailtext oder Standardliste]
+    UNPACK --> SANDBOX[CAPE Sandbox<br/>Verhaltensanalyse in VM]
+
+    CLASSIFY -->|EML / MSG| HEADERS[Header-Analyse<br/>SPF / DKIM / DMARC / ARC]
+    HEADERS --> URLCHECK[URL-Extraktion<br/>Prüfung über Tor-Proxy]
+
+    SANDBOX --> OSINT[Multi-Source OSINT<br/>Reputation & Scan-Ergebnisse]
+    URLCHECK --> OSINT
+
+    OSINT --> LLM[Lokales LLM<br/>Kontextbezogene Risikobewertung]
+    SANDBOX -.Verhaltensdaten.-> LLM
+
+    LLM --> REPORT[HTML-Report<br/>Ampel-System]
+    REPORT -->|SMTP| REPLY[Automatische Antwort an Einsender]
+    LLM -->|bei relevanten Funden| TI[Threat-Intel-Export<br/>IOCs für Sharing]
+      </pre>
+    </div>
+    <p>Die Pipeline läuft vollständig unbeaufsichtigt: von der eingehenden Mail bis zum fertigen Report inklusive optionalem IOC-Export ist kein manueller Eingriff nötig.</p>
+  </div>
+</section>
+
+<section id="techstack">
+  <div class="container">
+    <h2>Tech-Stack</h2>
+    <div class="tech-grid">
+      <span class="tech-item">Python 3</span>
+      <span class="tech-item">IMAP / SMTP</span>
+      <span class="tech-item">CAPEv2 Sandbox</span>
+      <span class="tech-item">Lokales LLM (Ollama)</span>
+      <span class="tech-item">ZIP / 7z / RAR-Handling</span>
+      <span class="tech-item">SPF / DKIM / DMARC / ARC-Parsing</span>
+      <span class="tech-item">Tor / SOCKS5-Proxy</span>
+      <span class="tech-item">Multi-Source OSINT-APIs</span>
+      <span class="tech-item">systemd Timer + Service</span>
+      <span class="tech-item">HTML-Reporting</span>
+      <span class="tech-item">JSON-Logging</span>
+      <span class="tech-item">Threat-Intel-Export (IOCs)</span>
+    </div>
+  </div>
+</section>
+
+<section id="quickstart">
+  <div class="container">
+    <h2>Quickstart</h2>
+    <p>Repository klonen und Konfiguration anhand der mitgelieferten Vorlage anlegen:</p>
+    <pre><code>git clone https://github.com/icepaule/IcePorge-CAPE-Mailer.git
+cd IcePorge-CAPE-Mailer
+
+# Konfigurationsvorlage kopieren und anpassen
+cp config.yaml.example config/config.yaml
+
+# eigene IMAP/SMTP-Zugangsdaten, CAPE-Pfad und
+# OSINT-/LLM-Einstellungen in config/config.yaml eintragen
+
+python3 bin/cape_mailer.py</code></pre>
+    <p>Für den Dauerbetrieb wird das Skript üblicherweise über einen systemd-Timer in kurzem Intervall (z. B. minütlich) gestartet, sodass eingehende Analyse-Anfragen zeitnah verarbeitet werden.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <p>
+      <a href="https://github.com/icepaule/IcePorge-CAPE-Mailer">Repository auf GitHub</a>
+      &nbsp;·&nbsp;
+      <a href="https://icepaule.github.io/">Weitere Projekte</a>
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
